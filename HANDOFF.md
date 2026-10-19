@@ -303,3 +303,54 @@ Key files: `harness_luraph.lua`, `runluraph.js`, `fmt.js`, `build_keyless.js`,
 `encode_payload.js`, `make_keyless.js`, `pool_names.lua` (the 301 identifiers),
 `pool_scan.js` / `pool_names.js` (pool tools), `luau/luau.exe`,
 `luau/luau-compile.exe`, `t2/` (fetched originals).
+
+---
+
+## 9. POST-MORTEM — the bug that made the first keyless build "do nothing"
+
+**Symptom (user, in Roblox):** the loader ran and *nothing happened* — no error, no UI.
+**Cause:** the protected script's key gate is a **wait loop**:
+`repeat task.wait() until <the key is set>`.
+
+The first keyless build only redirected the **Luraph VM's** environment
+(`,n=getfenv,` → a snapshot). That made the *script's* global reads resolve, but the
+gate reads the key through **`getgenv()`** — the executor's *shared* global table,
+which the VM's env does not own. So the loop never exited and the script sat there
+forever. (In the headless harness the same thing looked like a hang, which is what
+gave the clue.)
+
+**Fix (in `build_keyless.js`):** also wrap `getgenv` itself so the key names always
+resolve, and cache the wrapped table (the VM calls `getfenv()` ~25 M times, so
+nothing on that path may allocate):
+
+```lua
+local real_getgenv = __REAL_ENV.getgenv
+if type(real_getgenv) == "function" then
+  local cache = nil
+  __REAL_ENV.getgenv = function()
+    if cache then return cache end
+    local ok, g = pcall(real_getgenv)
+    if not ok or type(g) ~= "table" then g = {} end
+    for _, k in ipairs({ "LDKey","LD_KEY","script_key","Key","KEY","key",
+                         "ButterKey","BUTTER_KEY","ld_key","ldkey" }) do
+      if g[k] == nil then pcall(function() g[k] = __butter_key end) end
+    end
+    cache = g
+    return g
+  end
+end
+```
+
+**Lesson for anyone continuing:** when a protected script "does nothing", suspect a
+wait loop, not a crash. Instrument the environment (both the VM's `getfenv` and
+`getgenv()`) and log what the script polls.
+
+**Also worth knowing:** the self-check in `RUN_ME_Butter_BABFT_keyless.lua` prints
+`[Butter] keyless: script started` on success, `[Butter] kick suppressed: ...` if the
+gate ever tried to kick, and `[Butter] keyless: script error: ...` on a throw.
+
+**Credential hygiene:** the GitHub token used for the pushes is a Git Credential
+Manager OAuth token (`gho_…`) for `tobybt747-ship-it`. It was pasted into a chat
+transcript during this session — revoke it at
+https://github.com/settings/applications and re-run
+`"protocol=https`nhost=github.com`n`n" | git credential fill` to mint a fresh one.
