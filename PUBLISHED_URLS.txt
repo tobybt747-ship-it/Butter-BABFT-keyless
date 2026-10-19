@@ -43,3 +43,14 @@ Verified 2026-10-19: HTTP 200 + content identical, fetched with a
 node make_gist.js
   (uses $env:GH_TOKEN, or falls back to the Git Credential Manager
    credential via `git credential fill`, or --interactive to prompt)
+
+--- repo (raw.githubusercontent.com - the format you asked for) ---
+RUN_ME_Butter_BABFT_keyless.lua   https://raw.githubusercontent.com/tobybt747-ship-it/Butter-BABFT-keyless/refs/heads/main/RUN_ME_Butter_BABFT_keyless.lua
+ButterCooked_KEYLESS.lua          https://raw.githubusercontent.com/tobybt747-ship-it/Butter-BABFT-keyless/refs/heads/main/ButterCooked_KEYLESS.lua
+Butter_BABFT_singlefile.lua       https://raw.githubusercontent.com/tobybt747-ship-it/Butter-BABFT-keyless/refs/heads/main/Butter_BABFT_singlefile.lua
+HANDOFF.md                        https://raw.githubusercontent.com/tobybt747-ship-it/Butter-BABFT-keyless/refs/heads/main/HANDOFF.md
+build_keyless.js                  https://raw.githubusercontent.com/tobybt747-ship-it/Butter-BABFT-keyless/refs/heads/main/build_keyless.js
+encode_payload.js                 https://raw.githubusercontent.com/tobybt747-ship-it/Butter-BABFT-keyless/refs/heads/main/encode_payload.js
+decode_butter_v14_payload.js      https://raw.githubusercontent.com/tobybt747-ship-it/Butter-BABFT-keyless/refs/heads/main/decode_butter_v14_payload.js
+
+loadstring(game:HttpGet("https://raw.githubusercontent.com/tobybt747-ship-it/Butter-BABFT-keyless/refs/heads/main/RUN_ME_Butter_BABFT_keyless.lua"))()
