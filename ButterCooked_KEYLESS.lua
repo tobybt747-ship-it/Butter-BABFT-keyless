@@ -639,6 +639,101 @@ do
 
 end
 -- ------------------------------------------------------------------
+-- rawset interception + runtime API wrapping
+--
+-- The nested runtime's vocabulary includes rawset / rawget, and the
+-- VM's table is built with short obfuscated field names that are
+-- RENAMED at runtime (that is why the error trace can name
+-- "Loadstring.loadstring" while the source contains neither string).
+--
+-- If the rename goes through rawset, a metatable on the table is
+-- bypassed completely - which is exactly what happened: my
+-- __newindex / __index hooks never fired, so the VM's internal
+-- require and loadstring were never wrapped.
+--
+-- So intercept rawset itself:
+--
+--   * when the VM stores a table under a decoded API name such as
+--     "Require" / "Loadstring" / "Pcall" / "Error", wrap that table's
+--     functions right away
+--   * the VM's internal require is made to answer require("debug")
+--     with a working debug library (it is the one thing the runtime
+--     is known to ask for, and it currently returns nil)
+--   * the VM's internal loadstring / pcall / error are wrapped so the
+--     ORIGINAL error is reported with a stack trace instead of being
+--     destroyed by Luraph's own reporter
+--
+-- A deferred pass repeats the search in case the rename happened by
+-- another route.
+-- ------------------------------------------------------------------
+
+do
+  local function __butter_wrap_require(r)
+    if type(r) ~= "function" then return r end
+    return function(a, b, ...)
+      local name = nil
+      if type(a) == "string" then name = a
+      elseif type(b) == "string" then name = b end
+      if name == "debug" then
+        __butter_require_debug_calls = (__butter_require_debug_calls or 0) + 1
+        return __butter_dbg
+      end
+      return r(a, b, ...)
+    end
+  end
+
+  local function __butter_wrap_table_fields(v)
+    if type(v) ~= "table" then return v end
+    local r = rawget(v, "require")
+    if type(r) == "function" then pcall(function() v.require = __butter_wrap_require(r) end) end
+    local f = rawget(v, "loadstring")
+    if type(f) == "function" then pcall(function() v.loadstring = __butter_wrap_vm_fn(f, "loadstring") end) end
+    local p = rawget(v, "pcall")
+    if type(p) == "function" then pcall(function() v.pcall = __butter_wrap_vm_fn(p, "pcall") end) end
+    local x = rawget(v, "xpcall")
+    if type(x) == "function" then pcall(function() v.xpcall = __butter_wrap_vm_fn(x, "xpcall") end) end
+    local e = rawget(v, "error")
+    if type(e) == "function" then pcall(function() v.error = __butter_wrap_vm_fn(e, "error") end) end
+    return v
+  end
+
+  -- intercept rawset ------------------------------------------------------
+  local __butter_real_rawset = rawset
+  function __butter_rawset(t, k, v)
+    if type(t) == "table" and type(k) == "string" and type(v) == "table" then
+      local kk = k:lower()
+      if kk == "require" or kk == "loadstring" or kk == "pcall" or kk == "xpcall" or kk == "error" then
+        pcall(function() __butter_wrap_table_fields(v) end)
+      end
+    end
+    return __butter_real_rawset(t, k, v)
+  end
+
+  -- install it where the runtime will look for it
+  pcall(function() __butter_env.rawset = __butter_rawset end)
+  pcall(function() _G.rawset = __butter_rawset end)
+  pcall(function()
+    if type(getgenv) == "function" then
+      local g = getgenv()
+      if type(g) == "table" then g.rawset = __butter_rawset end
+    end
+  end)
+  pcall(function()
+    if type(__butter_P) == "table" then __butter_P["rawset"] = __butter_rawset end
+  end)
+
+  -- a deferred pass in case the rename used another route
+  pcall(function()
+    task.defer(function()
+      pcall(function()
+        for _, v in pairs(__butter_P) do
+          if type(v) == "table" then __butter_wrap_table_fields(v) end
+        end
+      end)
+    end)
+  end)
+end
+-- ------------------------------------------------------------------
 -- VM-level interception
 --
 -- The trace names the failing function "Loadstring.loadstring", i.e.
