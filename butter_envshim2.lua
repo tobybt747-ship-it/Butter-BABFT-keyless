@@ -33,7 +33,7 @@ do
       SG.ResetOnSpawn = false
       local L = Instance.new("TextLabel")
       L.Size = UDim2.new(1, -60, 0, 260)
-      L.Position = UDim2.new(0, 30, 0, 220)
+      L.Position = UDim2.new(0, 30, 0, 380)
       L.BackgroundColor3 = Color3.fromRGB(18, 18, 20)
       L.BackgroundTransparency = 0.1
       L.TextColor3 = Color3.fromRGB(120, 220, 255)
