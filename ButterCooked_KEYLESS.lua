@@ -366,17 +366,50 @@ end
 local __butter_log = __REAL_ENV.__BUTTER_LOG
 local function __butter_trace(msg)
   if type(__butter_log) == "function" then pcall(function() __butter_log(msg) end) end
+  if type(__butter_box) == "function" then
+    pcall(function() __butter_box("[Butter] net", tostring(msg), 460, Color3.fromRGB(20, 30, 50)) end)
+  end
 end
 
 -- the key is checked against a server: always answer "valid"
 local __butter_valid_body = '{"valid":true,"success":true,"status":"valid","active":true,"authorized":true,"verified":true,"key":"' .. __butter_key .. '","hwid":"1","expires":0,"code":200,"message":"ok","data":{"valid":true,"active":true}}'
+
+-- A body that is valid LUA, so that loadstring() of it succeeds.
+-- The payload calls loadstring() on whatever it downloads; if the body
+-- is not valid Lua the VM's loadstring returns nil and the payload
+-- dies with "attempt to index nil with 'info'".
+local __butter_lua_body = "return setmetatable({info={source='@Butter',currentline=0,name='info'}},{__call=function(self,...) return self end})"
+
+-- the real network functions, captured before they are replaced
+local __butter_real_httpget = (type(__REAL_ENV.game) == "table" and __REAL_ENV.game.HttpGet) or nil
+local __butter_real_request = __REAL_ENV.request
+local __butter_real_http_request = (type(__REAL_ENV.http) == "table" and __REAL_ENV.http.request) or nil
+
+-- The key server is faked.  Everything else is fetched for real, so the
+-- script can still download the modules it actually needs.
+local function __butter_is_key_url(url)
+  local u = string.lower(tostring(url or ""))
+  return (u:find("luadefender", 1, true) ~= nil) or (u:find("/key", 1, true) ~= nil)
+end
+
+local function __butter_body_for(url)
+  if __butter_is_key_url(url) then return __butter_valid_body end
+  if type(__butter_real_httpget) == "function" then
+    local ok, res = pcall(function() return __butter_real_httpget(__REAL_ENV.game, url) end)
+    if ok and type(res) == "string" and #res > 0 then
+      __butter_trace("  -> real file (" .. #res .. " bytes)")
+      return res
+    end
+  end
+  return __butter_lua_body
+end
 
 do
   local h = __REAL_ENV.http
   if type(h) == "table" then
     h.request = function(url, opts, cb)
       __butter_trace("http.request -> " .. tostring(url))
-      local body = __butter_valid_body
+      local body = __butter_body_for(url)
       if type(opts) == "function" then cb = opts end
       local res = {
         StatusCode = 200, Status = 200, Body = body, body = body,
@@ -389,8 +422,9 @@ do
     if type(h.get) == "function" then
       h.get = function(url, cb)
         __butter_trace("http.get -> " .. tostring(url))
-        if cb then pcall(function() cb(__butter_valid_body) end) end
-        return __butter_valid_body
+        local body = __butter_body_for(url)
+        if cb then pcall(function() cb(body) end) end
+        return body
       end
     end
   end
@@ -399,25 +433,27 @@ do
   if type(HS) == "table" then
     HS.RequestAsync = function(_, url)
       __butter_trace("HttpService.RequestAsync -> " .. tostring(url))
-      return { StatusCode = 200, Body = __butter_valid_body, body = __butter_valid_body,
+      local body = __butter_body_for(url)
+      return { StatusCode = 200, Body = body, body = body,
                Success = true, ok = true, Headers = { ["content-type"] = "application/json" } }
     end
     if type(HS.GetAsync) == "function" then
-      HS.GetAsync = function(_, url) __butter_trace("HttpService.GetAsync -> " .. tostring(url)); return __butter_valid_body end
+      HS.GetAsync = function(_, url) __butter_trace("HttpService.GetAsync -> " .. tostring(url)); return __butter_body_for(url) end
     end
     if type(HS.PostAsync) == "function" then
-      HS.PostAsync = function(_, url) __butter_trace("HttpService.PostAsync -> " .. tostring(url)); return __butter_valid_body end
+      HS.PostAsync = function(_, url) __butter_trace("HttpService.PostAsync -> " .. tostring(url)); return __butter_body_for(url) end
     end
   end
 
   if type(__REAL_ENV.game) == "table" then
-    __REAL_ENV.game.HttpGet = function(_, url) __butter_trace("game:HttpGet -> " .. tostring(url)); return __butter_valid_body end
+    __REAL_ENV.game.HttpGet = function(_, url) __butter_trace("game:HttpGet -> " .. tostring(url)); return __butter_body_for(url) end
   end
 
   if type(__REAL_ENV.request) == "function" then
     __REAL_ENV.request = function(url, opts)
       __butter_trace("request() -> " .. tostring(url))
-      return { StatusCode = 200, Body = __butter_valid_body, body = __butter_valid_body, Success = true }
+      local body = __butter_body_for(url)
+      return { StatusCode = 200, Body = body, body = body, Success = true }
     end
   end
   if type(__REAL_ENV.syn) == "table" and type(__REAL_ENV.syn.request) == "function" then
