@@ -548,3 +548,27 @@ blob itself is untouched (the build still reports `payload untouched: YES`).
 So the debug library is now offered at three levels:
 the environment the VM resolves globals from (`__butter_env`), the real global
 table (`_G`) and `getgenv()`, plus the VM's own table.
+
+### 12.6 Second layer: the VM's own table
+
+The protected file's last statement is
+
+    return({s={49229,...},...}):B()(...)
+
+i.e. the VM builds a table and then calls a method on it. If the VM implements
+`require` itself, that implementation would shadow the environment override,
+because the VM's global table is assembled from that table's fields.
+
+`build_keyless.js` therefore rewrites the statement to
+
+    local __butter_P=({...})
+    __butter_P["require"]=__butter_require
+    __butter_P["debug"]=__butter_dbg
+    return __butter_P:B()(...)
+
+which is semantically identical apart from the two forced fields. The payload
+blob itself is untouched (the build still reports `payload untouched: YES`).
+
+So the debug library is now offered at three levels:
+the environment the VM resolves globals from (`__butter_env`), the real global
+table (`_G`) and `getgenv()`, plus the VM's own table.
