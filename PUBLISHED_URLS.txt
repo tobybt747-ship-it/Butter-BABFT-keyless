@@ -1,0 +1,45 @@
+Butter BABFT — published URLs
+============================
+
+Gist (secret/unlisted):  https://gist.github.com/tobybt747-ship-it/0795937c24f2bc7a30eb248bcc1cb81d
+Gist id:                 0795937c24f2bc7a30eb248bcc1cb81d
+Account:                 tobybt747-ship-it
+
+--- loadstring one-liner (recommended) ------------------------------
+loadstring(game:HttpGet("https://gist.githubusercontent.com/tobybt747-ship-it/0795937c24f2bc7a30eb248bcc1cb81d/raw/87a90e6dfb8165a3673dc62389ca1a92bdfa608c/RUN_ME_Butter_BABFT_keyless.lua"))()
+
+--- raw file URLs (each pinned to its own blob SHA) ------------------
+RUN_ME_Butter_BABFT_keyless.lua   2,775 B
+  https://gist.githubusercontent.com/tobybt747-ship-it/0795937c24f2bc7a30eb248bcc1cb81d/raw/87a90e6dfb8165a3673dc62389ca1a92bdfa608c/RUN_ME_Butter_BABFT_keyless.lua
+
+Butter_BABFT_keyless_loader.lua   2,620 B
+  https://gist.githubusercontent.com/tobybt747-ship-it/0795937c24f2bc7a30eb248bcc1cb81d/raw/755640a27a7c518e772c7c5db2b9dc6e703d447e/Butter_BABFT_keyless_loader.lua
+
+Butter_BABFT_singlefile.lua     1,383,265 B   (self-contained, no HTTP needed)
+  https://gist.githubusercontent.com/tobybt747-ship-it/0795937c24f2bc7a30eb248bcc1cb81d/raw/7e267f5b8675e041407c6ddeb2010e7bf144f018/Butter_BABFT_singlefile.lua
+
+01_UI.lua                         95,117 B
+  https://gist.githubusercontent.com/tobybt747-ship-it/0795937c24f2bc7a30eb248bcc1cb81d/raw/f104828cd28e537a3a7776c100e6e14a0f24efbe/01_UI.lua
+
+02_BABFT_ui_lib.lua               72,782 B
+  https://gist.githubusercontent.com/tobybt747-ship-it/0795937c24f2bc7a30eb248bcc1cb81d/raw/cf80684a3cafda74f93b352d85c5f74113fec79f/02_BABFT_ui_lib.lua
+
+03_main_loader.lua                 2,847 B
+  https://gist.githubusercontent.com/tobybt747-ship-it/0795937c24f2bc7a30eb248bcc1cb81d/raw/5758607191ca7d1d1056ff010394b4fc042b327a/03_main_loader.lua
+
+properties.json                    6,373 B
+  https://gist.githubusercontent.com/tobybt747-ship-it/0795937c24f2bc7a30eb248bcc1cb81d/raw/62ef52b1930b84fe42abdbe7897bda1dcd4381c3/properties.json
+
+HANDOFF.md                        17,393 B
+  https://gist.githubusercontent.com/tobybt747-ship-it/0795937c24f2bc7a30eb248bcc1cb81d/raw/1a6d75eb6336365a8872bbf1a1df6908b57b4994/HANDOFF.md
+
+--- mirror (paste.rs, in case gist is blocked) -----------------------
+keyless loader:  https://paste.rs/dBJZe
+
+Verified 2026-10-19: HTTP 200 + content identical, fetched with a
+"Roblox/WinInet (Windows NT 10.0; Win64; x64)" User-Agent.
+
+--- how the gist was created ----------------------------------------
+node make_gist.js
+  (uses $env:GH_TOKEN, or falls back to the Git Credential Manager
+   credential via `git credential fill`, or --interactive to prompt)
