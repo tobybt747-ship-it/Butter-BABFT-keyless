@@ -33,7 +33,7 @@ do
       SG.ResetOnSpawn = false
       local L = Instance.new("TextLabel")
       L.Size = UDim2.new(1, -60, 0, 260)
-      L.Position = UDim2.new(0, 30, 0, 380)
+      L.Position = UDim2.new(0, 30, 0, __butter_next_y())
       L.BackgroundColor3 = Color3.fromRGB(18, 18, 20)
       L.BackgroundTransparency = 0.1
       L.TextColor3 = Color3.fromRGB(120, 220, 255)
@@ -43,6 +43,19 @@ do
       L.TextYAlignment = Enum.TextYAlignment.Top
       L.Text = tostring(title) .. "\n" .. tostring(body)
       L.Parent = SG
+            do
+        local X = Instance.new("TextButton")
+        X.Size = UDim2.new(0, 26, 0, 26)
+        X.Position = UDim2.new(1, -34, 0, 4)
+        X.BackgroundColor3 = Color3.fromRGB(160, 40, 40)
+        X.BackgroundTransparency = 0.15
+        X.TextColor3 = Color3.fromRGB(255, 255, 255)
+        X.TextSize = 18
+        X.Font = Enum.Font.GothamBold
+        X.Text = "X"
+        X.Parent = L
+        X.MouseButton1Click:Connect(function() SG:Destroy() end)
+      end
       SG.Parent = game:GetService("CoreGui")
     end)
   end
