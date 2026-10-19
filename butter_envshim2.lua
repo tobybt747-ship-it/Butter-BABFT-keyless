@@ -61,7 +61,7 @@ do
 
   -- the debug table the payload will actually see
   local function __butter_make_debug(real)
-    if type(real) == "table" and real.info ~= nil and real.getinfo ~= nil then return real end
+    if type(real) == "table" and type(real.info) == "function" and type(real.getinfo) == "function" then return real end
     if type(real) ~= "table" then real = {} end
     return setmetatable({}, {
       __index = function(_, k)
@@ -135,24 +135,24 @@ do
   -- 3. report what is where, on screen
   local function __butter_typeof(v)
     if type(v) == "table" then
-      local i = rawget(v, "info")
+      local i = v.info
       return "table(info=" .. tostring(type(i)) .. ")"
     end
     return type(v)
   end
   local __butter_report = {}
-  __butter_report[#__butter_report + 1] = "env.debug   = " .. __butter_typeof(rawget(__butter_env, "debug"))
-  __butter_report[#__butter_report + 1] = "_G.debug    = " .. __butter_typeof(type(_G) == "table" and rawget(_G, "debug") or nil)
+  __butter_report[#__butter_report + 1] = "env.debug   = " .. __butter_typeof(__butter_env.debug)
+  __butter_report[#__butter_report + 1] = "_G.debug    = " .. __butter_typeof(type(_G) == "table" and _G.debug or nil)
   pcall(function()
     if type(getgenv) == "function" then
       local g = getgenv()
-      __butter_report[#__butter_report + 1] = "genv.debug  = " .. __butter_typeof(type(g) == "table" and rawget(g, "debug") or nil)
+      __butter_report[#__butter_report + 1] = "genv.debug  = " .. __butter_typeof(type(g) == "table" and g.debug or nil)
     end
   end)
   pcall(function()
     if type(getfenv) == "function" then
       local g = getfenv()
-      __butter_report[#__butter_report + 1] = "fenv.debug  = " .. __butter_typeof(type(g) == "table" and rawget(g, "debug") or nil)
+      __butter_report[#__butter_report + 1] = "fenv.debug  = " .. __butter_typeof(type(g) == "table" and g.debug or nil)
     end
   end)
   __butter_report[#__butter_report + 1] = "debug reads so far: " .. tostring(__butter_debug_reads)
