@@ -449,49 +449,44 @@ end
 -- with the small X in its corner.
 -- ------------------------------------------------------------------
 
-__butter_box_y = 0
 
--- hand out a non-overlapping y for a box of the given height
+__butter_box_gui = nil
+__butter_box_label = nil
+__butter_box_text = ""
+
+-- hand out a non-overlapping y (kept for compatibility)
 function __butter_next_y(height)
-  local y = __butter_box_y
-  __butter_box_y = y + (height or 150) + 8
-  if y > 600 then
-    y = 150
-    __butter_box_y = 150 + (height or 150) + 8
-  end
-  return y
+  return 0
 end
 
+-- every diagnostic ends up in ONE box with a single close button
 function __butter_box(title, body, height, color)
-  height = height or 150
-  color = color or Color3.fromRGB(18, 18, 20)
-  local y = __butter_box_y
-  __butter_box_y = y + height + 8
-  if y > 620 then
-    y = 180
-    __butter_box_y = 180 + height + 8
+  body = tostring(body)
+  if body ~= "" then
+    __butter_box_text = __butter_box_text .. tostring(title) .. "\n" .. body .. "\n\n"
   end
   pcall(function()
+    if __butter_box_gui and __butter_box_gui.Parent then
+      __butter_box_label.Text = __butter_box_text
+      return
+    end
     local SG = Instance.new("ScreenGui")
     SG.Name = "ButterBox"
     SG.DisplayOrder = 99999
     SG.IgnoreGuiInset = true
     SG.ResetOnSpawn = false
-
     local L = Instance.new("TextLabel")
-    L.Size = UDim2.new(1, -70, 0, height)
-    L.Position = UDim2.new(0, 30, 0, y)
-    L.BackgroundColor3 = color
+    L.Size = UDim2.new(1, -70, 0, 460)
+    L.Position = UDim2.new(0, 30, 0, 30)
+    L.BackgroundColor3 = color or Color3.fromRGB(18, 18, 20)
     L.BackgroundTransparency = 0.1
     L.TextColor3 = Color3.fromRGB(240, 240, 240)
     L.TextSize = 14
     L.TextWrapped = true
     L.TextXAlignment = Enum.TextXAlignment.Left
     L.TextYAlignment = Enum.TextYAlignment.Top
-    L.Text = tostring(title) .. "\n" .. tostring(body)
+    L.Text = __butter_box_text
     L.Parent = SG
-
-    -- close button
     local X = Instance.new("TextButton")
     X.Size = UDim2.new(0, 26, 0, 26)
     X.Position = UDim2.new(1, -34, 0, 4)
@@ -501,11 +496,16 @@ function __butter_box(title, body, height, color)
     X.TextSize = 18
     X.Font = Enum.Font.GothamBold
     X.Text = "X"
-    X.AutoButtonColor = true
     X.Parent = L
-    X.MouseButton1Click:Connect(function() SG:Destroy() end)
-
+    X.MouseButton1Click:Connect(function()
+      SG:Destroy()
+      __butter_box_gui = nil
+      __butter_box_label = nil
+      __butter_box_text = ""
+    end)
     SG.Parent = game:GetService("CoreGui")
+    __butter_box_gui = SG
+    __butter_box_label = L
   end)
 end
 -- ------------------------------------------------------------------
@@ -560,6 +560,33 @@ function __butter_dbginfo2(level, what, options)
   }
 end
 
+-- the client's real setfenv, captured before we replace it
+__butter_real_setfenv = (_G and rawget(_G, "setfenv")) or (rawget(__REAL_ENV, "setfenv"))
+
+-- Everything the runtime needs, in case the VM hands us an environment
+-- of its own that lacks them.
+__butter_envfill = {
+  "debug", "getfenv", "setfenv", "getinfo", "traceback", "require",
+  "LDKey", "LD_KEY", "script_key", "Key", "KEY", "key",
+  "ButterKey", "BUTTER_KEY", "ld_key", "ldkey",
+}
+
+-- setfenv(chunk, env): keep the environment the VM asked for, but make
+-- sure it also carries the debug library and friends, then apply it.
+function __butter_setfenv(chunk, env)
+  if type(env) == "table" then
+    for _, k in ipairs(__butter_envfill) do
+      if env[k] == nil and __butter_env[k] ~= nil then
+        pcall(function() env[k] = __butter_env[k] end)
+      end
+    end
+  end
+  if type(__butter_real_setfenv) == "function" then
+    return __butter_real_setfenv(chunk, env)
+  end
+  return nil
+end
+
 do
   -- the debug library the runtime will use
   local real = _G and _G.debug
@@ -596,7 +623,7 @@ do
     if type(t) ~= "table" then return end
     t.debug = dbg
     t.getfenv = function(...) return t end
-    t.setfenv = function(...) return nil end
+    t.setfenv = __butter_setfenv
     t.getinfo = function(level, what, options) return __butter_dbginfo2(level, what, options) end
     t.traceback = __butter_traceback
   end
@@ -661,39 +688,7 @@ local function __butter_vm_report(kind, err)
   local body = key .. "\n\n" .. __butter_vm_trace(err)
     .. "\n\nrequire(\"debug\") calls: " .. tostring(__butter_require_debug_calls)
     .. "   debug.info calls: " .. tostring(__butter_dbg_calls)
-  pcall(function()
-    local SG = Instance.new("ScreenGui")
-    SG.Name = "ButterVMError"
-    SG.DisplayOrder = 99999
-    SG.IgnoreGuiInset = true
-    SG.ResetOnSpawn = false
-    local L = Instance.new("TextLabel")
-    L.Size = UDim2.new(1, -60, 0, 420)
-    L.Position = UDim2.new(0, 30, 0, __butter_next_y())
-    L.BackgroundColor3 = Color3.fromRGB(40, 12, 12)
-    L.BackgroundTransparency = 0.1
-    L.TextColor3 = Color3.fromRGB(255, 170, 170)
-    L.TextSize = 13
-    L.TextWrapped = true
-    L.TextXAlignment = Enum.TextXAlignment.Left
-    L.TextYAlignment = Enum.TextYAlignment.Top
-    L.Text = "[Butter] VM " .. kind .. " error\n" .. body
-    L.Parent = SG
-        do
-      local X = Instance.new("TextButton")
-      X.Size = UDim2.new(0, 26, 0, 26)
-      X.Position = UDim2.new(1, -34, 0, 4)
-      X.BackgroundColor3 = Color3.fromRGB(160, 40, 40)
-      X.BackgroundTransparency = 0.15
-      X.TextColor3 = Color3.fromRGB(255, 255, 255)
-      X.TextSize = 18
-      X.Font = Enum.Font.GothamBold
-      X.Text = "X"
-      X.Parent = L
-      X.MouseButton1Click:Connect(function() SG:Destroy() end)
-    end
-    SG.Parent = game:GetService("CoreGui")
-  end)
+  __butter_box("[Butter] VM " .. kind .. " error", body, 460, Color3.fromRGB(40, 12, 12))
 end
 
 -- the VM's pcall ------------------------------------------------------------
@@ -746,21 +741,29 @@ function __butter_wrap_vm_fn(f, name)
   end
 end
 
+-- wrap the interesting fields of a table RIGHT NOW (eagerly)
+function __butter_wrap_fields(t)
+  if type(t) ~= "table" then return t end
+  for k, v in pairs(t) do
+    if type(v) == "function" and __butter_vm_hooknames[k] then
+      pcall(function() rawset(t, k, __butter_wrap_vm_fn(v, k)) end)
+    elseif type(v) == "table" then
+      __butter_wrap_fields(v)
+    end
+  end
+  return t
+end
+
 function __butter_guard_table(t)
   if type(t) ~= "table" then return t end
+  __butter_wrap_fields(t)
   if getmetatable(t) then return t end
   setmetatable(t, {
-    __index = function(tt, k)
-      local v = rawget(tt, k)
-      if type(v) == "function" and __butter_vm_hooknames[k] then
-        v = __butter_wrap_vm_fn(v, k)
-        rawset(tt, k, v)
-      end
-      return v
-    end,
     __newindex = function(tt, k, v)
       if type(v) == "function" and __butter_vm_hooknames[k] then
         v = __butter_wrap_vm_fn(v, k)
+      elseif type(v) == "table" then
+        __butter_wrap_fields(v)
       end
       rawset(tt, k, v)
     end,
@@ -809,41 +812,7 @@ end
 --   forces them onto the VM's own table as well.
 -- ------------------------------------------------------------------
 
-local function __butter_shown_req(title, body)
-  pcall(function()
-    local SG = Instance.new("ScreenGui")
-    SG.Name = "ButterRequireFix"
-    SG.DisplayOrder = 99999
-    SG.IgnoreGuiInset = true
-    SG.ResetOnSpawn = false
-    local L = Instance.new("TextLabel")
-    L.Size = UDim2.new(1, -60, 0, 160)
-    L.Position = UDim2.new(0, 30, 0, __butter_next_y())
-    L.BackgroundColor3 = Color3.fromRGB(18, 18, 20)
-    L.BackgroundTransparency = 0.1
-    L.TextColor3 = Color3.fromRGB(150, 255, 170)
-    L.TextSize = 15
-    L.TextWrapped = true
-    L.TextXAlignment = Enum.TextXAlignment.Left
-    L.TextYAlignment = Enum.TextYAlignment.Top
-    L.Text = tostring(title) .. "\n" .. tostring(body)
-    L.Parent = SG
-        do
-      local X = Instance.new("TextButton")
-      X.Size = UDim2.new(0, 26, 0, 26)
-      X.Position = UDim2.new(1, -34, 0, 4)
-      X.BackgroundColor3 = Color3.fromRGB(160, 40, 40)
-      X.BackgroundTransparency = 0.15
-      X.TextColor3 = Color3.fromRGB(255, 255, 255)
-      X.TextSize = 18
-      X.Font = Enum.Font.GothamBold
-      X.Text = "X"
-      X.Parent = L
-      X.MouseButton1Click:Connect(function() SG:Destroy() end)
-    end
-    SG.Parent = game:GetService("CoreGui")
-  end)
-end
+local function __butter_shown_req(title, body) __butter_box(title, body) end
 
 local function __butter_dbginfo(level, what, options)
   return {
@@ -944,41 +913,7 @@ end
 -- slowed down.
 -- ------------------------------------------------------------------
 do
-  local function __butter_shown_err(title, body)
-    pcall(function()
-      local SG = Instance.new("ScreenGui")
-      SG.Name = "ButterErrorHook"
-      SG.DisplayOrder = 99999
-      SG.IgnoreGuiInset = true
-      SG.ResetOnSpawn = false
-      local L = Instance.new("TextLabel")
-      L.Size = UDim2.new(1, -60, 0, 300)
-      L.Position = UDim2.new(0, 30, 0, __butter_next_y())
-      L.BackgroundColor3 = Color3.fromRGB(30, 10, 10)
-      L.BackgroundTransparency = 0.1
-      L.TextColor3 = Color3.fromRGB(255, 140, 140)
-      L.TextSize = 14
-      L.TextWrapped = true
-      L.TextXAlignment = Enum.TextXAlignment.Left
-      L.TextYAlignment = Enum.TextYAlignment.Top
-      L.Text = tostring(title) .. "\n" .. tostring(body)
-      L.Parent = SG
-            do
-        local X = Instance.new("TextButton")
-        X.Size = UDim2.new(0, 26, 0, 26)
-        X.Position = UDim2.new(1, -34, 0, 4)
-        X.BackgroundColor3 = Color3.fromRGB(160, 40, 40)
-        X.BackgroundTransparency = 0.15
-        X.TextColor3 = Color3.fromRGB(255, 255, 255)
-        X.TextSize = 18
-        X.Font = Enum.Font.GothamBold
-        X.Text = "X"
-        X.Parent = L
-        X.MouseButton1Click:Connect(function() SG:Destroy() end)
-      end
-      SG.Parent = game:GetService("CoreGui")
-    end)
-  end
+  local function __butter_shown_err(title, body) __butter_box(title, body) end
 
   local real_debug = rawget(_G, "debug")
 
@@ -1077,41 +1012,7 @@ end
 --      that identifies the nil.
 -- ------------------------------------------------------------------
 do
-  local function __butter_shown2(title, body)
-    pcall(function()
-      local SG = Instance.new("ScreenGui")
-      SG.Name = "ButterDiag2"
-      SG.DisplayOrder = 99999
-      SG.IgnoreGuiInset = true
-      SG.ResetOnSpawn = false
-      local L = Instance.new("TextLabel")
-      L.Size = UDim2.new(1, -60, 0, 260)
-      L.Position = UDim2.new(0, 30, 0, __butter_next_y())
-      L.BackgroundColor3 = Color3.fromRGB(18, 18, 20)
-      L.BackgroundTransparency = 0.1
-      L.TextColor3 = Color3.fromRGB(120, 220, 255)
-      L.TextSize = 15
-      L.TextWrapped = true
-      L.TextXAlignment = Enum.TextXAlignment.Left
-      L.TextYAlignment = Enum.TextYAlignment.Top
-      L.Text = tostring(title) .. "\n" .. tostring(body)
-      L.Parent = SG
-            do
-        local X = Instance.new("TextButton")
-        X.Size = UDim2.new(0, 26, 0, 26)
-        X.Position = UDim2.new(1, -34, 0, 4)
-        X.BackgroundColor3 = Color3.fromRGB(160, 40, 40)
-        X.BackgroundTransparency = 0.15
-        X.TextColor3 = Color3.fromRGB(255, 255, 255)
-        X.TextSize = 18
-        X.Font = Enum.Font.GothamBold
-        X.Text = "X"
-        X.Parent = L
-        X.MouseButton1Click:Connect(function() SG:Destroy() end)
-      end
-      SG.Parent = game:GetService("CoreGui")
-    end)
-  end
+  local function __butter_shown2(title, body) __butter_box(title, body) end
 
   local function __butter_info(level, what, options)
     return {
