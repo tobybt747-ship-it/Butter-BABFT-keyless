@@ -354,3 +354,48 @@ Manager OAuth token (`gho_…`) for `tobybt747-ship-it`. It was pasted into a ch
 transcript during this session — revoke it at
 https://github.com/settings/applications and re-run
 `"protocol=https`nhost=github.com`n`n" | git credential fill` to mint a fresh one.
+
+---
+
+## 10. The "attempt to index nil with 'info'" hunt (Xeno, no console)
+
+**Symptom:** in Roblox the script threw and the error was invisible. The on-screen
+diagnostics build (diagnostics via `print`/`warn` → a CoreGui notification) surfaced:
+
+```
+Luraph Script:(internal): Luraph Script:(internal):
+  CoreGui.1764.Loadstring.loadstring:133077  ButterCooked.lua:538: attempt to index nil with 'info'
+```
+
+**How to read it:**
+* the **double** `Luraph Script:(internal):` prefix means the protected script threw,
+  Luraph's handler caught it, and then **Luraph's own reporter threw too** — so the
+  original message was destroyed.
+* `ButterCooked.lua:538` is the chunk line; `133077` is the VM's bytecode offset.
+* the VM source contains **zero** occurrences of `info`, so the `.info` access is in
+  the *protected script*, not the VM.
+* the payload's string pool contains `source`, `currentline`, `linedefined`,
+  `lastlinedefined`, `namewhat`, `nparams`, `isvararg`, `short_src` — exactly the
+  fields of `debug.info()` → **the script calls `debug.info()`** (it has its own
+  error reporter), so the nil is very likely the `debug` table itself.
+
+**Fix (in `butter_envshim.lua`, spliced at the very top of the patched file):**
+the shim must run **before the Luraph VM builds its tables**, because the VM captures
+globals from the real global table at table-construction time. It therefore:
+1. `rawset(_G, "debug", …)` — a `debug` table that has a working `info`/`getinfo`
+   and falls through to the real one for everything else,
+2. does the same on `getgenv()`,
+3. plants the key names on both.
+
+**Why the earlier attempt failed:** the first shim only fixed `__butter_env` (the
+VM's env copy) — but the VM had already captured `debug` from the real `_G`, and on
+that client `_G` evidently has no usable `debug.info`.
+
+**Debugging technique worth keeping:** because the VM swallows errors, *route
+`print`/`warn` to a visible channel* (a CoreGui `TextLabel`) so a client with no
+console can still report. `butter_diag.lua` does that.
+
+**Reproduce locally:** the headless harness cannot fully stand in for Roblox (Luau
+0.743 has no `debug.info` and its global table is read-only, so the VM's reporter
+cannot be repaired there) — but the *user's* client can, and it does: the real error
+is only visible on their screen.
