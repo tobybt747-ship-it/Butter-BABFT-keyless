@@ -5,10 +5,22 @@
    =============================================================
    Paste this into your executor and run it.
 
-   It loads our key-less copy of the Butter BABFT script from GitHub
-   (ButterCooked_KEYLESS.lua) - that file is the original protected
-   script with the key gate neutralised inside it, so no key, no
-   key server and no "Couldn't find key!" kick.
+   It loads our key-less copy of the Butter BABFT script:
+     https://raw.githubusercontent.com/tobybt747-ship-it/Butter-BABFT-keyless/
+        refs/heads/main/ButterCooked_KEYLESS.lua
+
+   That file is the original protected script with the key gate
+   neutralised inside it:
+     * the key the gate looks for is always present
+     * the key server's answer is always a valid one
+     * the gate can never kick you
+
+   SELF-CHECK - after running, look for these in your console:
+     "[Butter] keyless: script started"   -> the cheat loaded, key gate passed
+     "[Butter] kick suppressed: ..."        -> the gate TRIED to kick and was blocked
+                                                 (if you see this, tell me - it means
+                                                  the gate wants a different key name)
+     "[Butter] keyless: script error: ..." -> the script threw, paste the message
   =============================================================
 ]]
 do
@@ -19,8 +31,11 @@ do
   if not chunk then
     error("[Butter] failed to load: " .. tostring(err))
   end
+
   local ok, e = pcall(chunk)
-  if not ok then
-    warn("[Butter] script error: " .. tostring(e))
+  if ok then
+    warn("[Butter] keyless: script started")
+  else
+    warn("[Butter] keyless: script error: " .. tostring(e))
   end
 end
