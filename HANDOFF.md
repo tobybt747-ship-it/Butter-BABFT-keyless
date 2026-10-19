@@ -399,3 +399,128 @@ console can still report. `butter_diag.lua` does that.
 0.743 has no `debug.info` and its global table is read-only, so the VM's reporter
 cannot be repaired there) — but the *user's* client can, and it does: the real error
 is only visible on their screen.
+
+---
+
+## 12. ROOT CAUSE FOUND — the payload's embedded Luraph runtime calls `require("debug")`
+
+### 12.1 The evidence
+
+The payload's string pool (`butter_string_pool.txt`) contains:
+
+| offset | len | string |
+|---|---|---|
+| 413 | 123 | `Your Lua environment does not support load or loadstring, therefore you are unable to use Luraph's 'LPH_NO_UPVALUES' macro.` |
+| 1313 | 5 | `debug` |
+| 4078 | 10 | `iscclosure` |
+| 4136 | 4 | `info` |
+| 4142 | 11 | `currentline` |
+| 5911 | 78 | `The debug library is required on Luau platforms. Please open a support ticket.` |
+| 7349 | 10 | `loadstring` |
+
+Plus the whole family of `debug.info()` result fields:
+`source` (5783), `short_src` (6032), `linedefined` (5375), `lastlinedefined` (6808),
+`namewhat` (4839), `nparams` (5270), `isvararg` (5600), `what` (6203).
+
+**Interpretation:**
+
+1. Entries 413 and 5911 are **Luraph runtime** messages, not application strings
+   (`LPH_NO_UPVALUES` is a Luraph macro). => **the payload embeds a nested Luraph
+   runtime**, which also explains the **double** `Luraph Script:(internal):`
+   prefix on the error: the inner runtime prefixes, then the outer VM prefixes.
+2. That nested runtime does `local debug = require("debug")` and then calls
+   `debug.info(level, what)`, reading back `currentline` / `source` / `namewhat` /
+   `nparams` / `isvararg` / `linedefined` / `lastlinedefined` / `short_src`.
+3. On Roblox (and in plain Luau) `require("debug")` does **not** return the debug
+   library, so the runtime gets `nil` and dies with
+   `attempt to index nil with 'info'`.
+
+### 12.2 Why every earlier fix missed it
+
+* Shimming the **global** `debug` cannot help — the runtime never looks at the
+  global, it calls `require("debug")`.
+* The headless harness reproduces the identical failure **even though the
+  harness already installs `debug.info` / `debug.getinfo` into the environment**
+  (`harness_luraph.lua`, the "executor-only globals" block). That is the
+  clincher: the global is fine, `require` is not.
+* `debug` is **not** in the VM's own source (case-insensitive grep of
+  `t2/butter_fmt.lua` -> 0 hits), so it is not the VM that indexes it.
+
+### 12.3 The fix (`butter_requirefix.lua`)
+
+Make `require("debug")` return a working debug library:
+
+```lua
+local function __butter_require(a, b, ...)
+  local name = nil
+  if type(a) == "string" then name = a
+  elseif type(b) == "string" then name = b end
+  if name == "debug" then return __butter_dbg end
+  if type(__butter_real_require) == "function" then
+    return __butter_real_require(a, b, ...)
+  end
+  return nil
+end
+```
+
+`__butter_dbg` is:
+
+* the **genuine** `_G.debug` when it already exposes `.info` — keeping it a
+  genuine C closure, so an `iscclosure(debug)` sanity check inside the runtime
+  still passes;
+* otherwise a wrapper that forwards every member to the real table and supplies
+  `.info` / `.getinfo`.
+
+The override is installed in `__butter_env` (the table the VM resolves the
+payload's globals through — `__butter_getfenv()` returns it, see
+`build_keyless.js` and `ButterCooked_KEYLESS.lua` line ~858) and in `_G`,
+**before** the VM's table constructor runs.
+
+### 12.4 Open risk
+
+`require` is **not** a name in the payload's 301-entry pool, so the outer VM may
+resolve it from its own internal implementation (the VM has internal tables
+such as `Loadstring.loadstring`, visible in the error trace) and thereby shadow
+the environment override.
+
+**The headless harness settles this**: if the harness (whose `env.require` is
+the wrapper) gets *past* the `.info` error, the environment override is enough.
+If it still fails there, the VM's internal `require` must be patched at the
+source level instead — the VM source is `t2/butter_cooked.lua`, and the patching
+mechanism already exists (`build_keyless.js` replaces `,n=getfenv,` with
+`,n=__butter_getfenv,` in the same string).
+
+### 12.5 The VM's own string table
+
+The VM's table constructor begins `return({s={49229,1541471000,...},LV=...,tV=...`
+— short obfuscated field names, with the real names decoded at runtime from the
+encoded string table. That is why `"Loadstring"` appears in the error trace but
+nowhere in the source, and why a plain grep for `debug`/`require` finds nothing.
+
+The VM's strings are encoded (Luraph base-85 style with `!` escapes). Decoding
+them would reveal the VM's internal API names and where `require` is
+implemented — that is the fallback route if 12.4 turns out to be a problem.
+
+### 12.6 Second layer: the VM's own table
+
+The protected file's last statement is
+
+    return({s={49229,...},...}):B()(...)
+
+i.e. the VM builds a table and then calls a method on it. If the VM implements
+`require` itself, that implementation would shadow the environment override,
+because the VM's global table is assembled from that table's fields.
+
+`build_keyless.js` therefore rewrites the statement to
+
+    local __butter_P=({...})
+    __butter_P["require"]=__butter_require
+    __butter_P["debug"]=__butter_dbg
+    return __butter_P:B()(...)
+
+which is semantically identical apart from the two forced fields. The payload
+blob itself is untouched (the build still reports `payload untouched: YES`).
+
+So the debug library is now offered at three levels:
+the environment the VM resolves globals from (`__butter_env`), the real global
+table (`_G`) and `getgenv()`, plus the VM's own table.
