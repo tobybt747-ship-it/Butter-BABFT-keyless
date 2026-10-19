@@ -33,6 +33,7 @@ do
   end
 
   local ok, e = pcall(chunk)
+  __butter_note = true
   if ok then
     warn("[Butter] keyless: script started")
   else
