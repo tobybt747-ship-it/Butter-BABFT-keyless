@@ -442,6 +442,151 @@ do
 end
 
 -- ------------------------------------------------------------------
+-- require("debug") fix
+--
+-- WHY
+--   The protected payload embeds a NESTED Luraph runtime (that is why
+--   the error carried a *double* "Luraph Script:(internal):" prefix,
+--   and why the pool contains Luraph runtime strings such as
+--   "Your Lua environment does not support load or loadstring, therefore
+--    you are unable to use Luraph's 'LPH_NO_UPVALUES' macro.").
+--
+--   That nested runtime does:
+--         local debug = require("debug")
+--         ... debug.info(level, what) ...
+--   and the payload's string pool contains every field of
+--   debug.info()'s result:
+--         source, short_src, currentline, linedefined,
+--         lastlinedefined, namewhat, nparams, isvararg, what
+--   plus the runtime message
+--         "The debug library is required on Luau platforms.
+--          Please open a support ticket."
+--   (pool offsets: debug=1313, iscclosure=4078, info=4136,
+--    currentline=4142, loadstring=7349)
+--
+--   On Roblox `require("debug")` does not return the debug library, so
+--   the runtime gets nil and dies with:
+--         attempt to index nil with 'info'
+--   Shimming the global `debug` cannot help - the runtime never looks
+--   at the global, it calls require().
+--
+-- WHAT
+--   Make require("debug") return a real, working debug library:
+--     * the genuine _G.debug when it already has .info  (keeps it a
+--       C closure, so an iscclosure() sanity check still passes)
+--     * otherwise a wrapper that forwards everything and supplies
+--       .info / .getinfo
+--   Everything else is delegated to the original require untouched.
+--
+--   The override is installed in __butter_env (the table the VM
+--   resolves globals through) and in _G, before the VM builds its
+--   tables.
+-- ------------------------------------------------------------------
+do
+  local function __butter_shown_req(title, body)
+    pcall(function()
+      local SG = Instance.new("ScreenGui")
+      SG.Name = "ButterRequireFix"
+      SG.DisplayOrder = 99999
+      SG.IgnoreGuiInset = true
+      SG.ResetOnSpawn = false
+      local L = Instance.new("TextLabel")
+      L.Size = UDim2.new(1, -60, 0, 160)
+      L.Position = UDim2.new(0, 30, 0, 30)
+      L.BackgroundColor3 = Color3.fromRGB(18, 18, 20)
+      L.BackgroundTransparency = 0.1
+      L.TextColor3 = Color3.fromRGB(150, 255, 170)
+      L.TextSize = 15
+      L.TextWrapped = true
+      L.TextXAlignment = Enum.TextXAlignment.Left
+      L.TextYAlignment = Enum.TextYAlignment.Top
+      L.Text = tostring(title) .. "\n" .. tostring(body)
+      L.Parent = SG
+      SG.Parent = game:GetService("CoreGui")
+    end)
+  end
+
+  local function __butter_dbginfo(level, what, options)
+    return {
+      source = "@ButterCooked.lua", short_src = "ButterCooked.lua",
+      currentline = 1, linedefined = 0, lastlinedefined = 0,
+      name = tostring(what or "what"), namewhat = "local",
+      nups = 0, nparams = 0, isvararg = false,
+      what = what,
+      func = function() end,
+    }
+  end
+
+  local function __butter_make_debug(real)
+    if type(real) ~= "table" then real = {} end
+    local has_info = type(rawget(real, "info")) == "function"
+    local has_getinfo = type(rawget(real, "getinfo")) == "function"
+
+    if has_info and not has_getinfo then
+      -- keep the genuine C closure, just add the missing alias
+      pcall(function() rawset(real, "getinfo", __butter_dbginfo) end)
+      has_getinfo = type(rawget(real, "getinfo")) == "function"
+    end
+
+    if has_info and has_getinfo then
+      return real, false
+    end
+
+    -- no usable debug library -> synthesise one
+    return setmetatable({}, {
+      __index = function(_, k)
+        if k == "info" or k == "getinfo" then return __butter_dbginfo end
+        local v = rawget(real, k)
+        if v ~= nil then return v end
+        return function() return nil end
+      end,
+    }), true
+  end
+
+  local __butter_dbg, __butter_dbg_fake = __butter_make_debug(rawget(_G, "debug"))
+
+  local __butter_real_require = __REAL_ENV.require
+
+  local function __butter_require(a, b, ...)
+    local name = nil
+    if type(a) == "string" then name = a
+    elseif type(b) == "string" then name = b end
+    if name == "debug" then return __butter_dbg end
+    if type(__butter_real_require) == "function" then
+      return __butter_real_require(a, b, ...)
+    end
+    return nil
+  end
+
+  -- the table the VM resolves the payload's globals through
+  __butter_env.require = __butter_require
+  -- and the real global table, in case the runtime reaches for it directly
+  pcall(function() _G.require = __butter_require end)
+  pcall(function()
+    if type(getgenv) == "function" then
+      local g = getgenv()
+      if type(g) == "table" then g.require = __butter_require end
+    end
+  end)
+
+  -- the debug library itself, everywhere it could be read from
+  __butter_env.debug = __butter_dbg
+  pcall(function() rawset(_G, "debug", __butter_dbg) end)
+  pcall(function()
+    if type(getgenv) == "function" then
+      local g = getgenv()
+      if type(g) == "table" then g.debug = __butter_dbg end
+    end
+  end)
+
+  __butter_shown_req("[Butter] require fix",
+    "require(\"debug\") -> " .. tostring(__butter_dbg)
+    .. "\ndebug.info = " .. tostring(type(__butter_dbg.info))
+    .. "\ndebug.getinfo = " .. tostring(type(__butter_dbg.getinfo))
+    .. "\nfake = " .. tostring(__butter_dbg_fake))
+end
+
+-- ------------------------------------------------------------------
 -- NEXT BUILD (ready to splice, NOT yet in the shipped file)
 --
 -- WHY THIS EXISTS
