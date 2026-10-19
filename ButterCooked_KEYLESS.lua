@@ -33,6 +33,28 @@ for _, k in ipairs({ "LDKey", "LD_KEY", "script_key", "Key", "KEY", "key",
   __butter_env[k] = __butter_key
 end
 
+-- The gate also reads the key through getgenv() - which is the executor's shared
+-- global table, NOT the VM's environment.  Wrap it so the key is always there.
+-- (Without this the script sits in a "repeat task.wait() until the key is set"
+--  loop forever, which looks like "nothing happened".)
+do
+  local real_getgenv = __REAL_ENV.getgenv
+  if type(real_getgenv) == "function" then
+    local __butter_genv_cache = nil
+    __REAL_ENV.getgenv = function()
+      if __butter_genv_cache then return __butter_genv_cache end
+      local ok, g = pcall(real_getgenv)
+      if not ok or type(g) ~= "table" then g = {} end
+      for _, k in ipairs({ "LDKey", "LD_KEY", "script_key", "Key", "KEY", "key",
+                           "ButterKey", "BUTTER_KEY", "ld_key", "ldkey" }) do
+        if g[k] == nil then pcall(function() g[k] = __butter_key end) end
+      end
+      __butter_genv_cache = g
+      return g
+    end
+  end
+end
+
 -- names the script references that this environment does not provide
 for _, k in ipairs({
     "NextInteger",
