@@ -858,7 +858,7 @@ function __butter_wrap_vm_api(t, depth)
       -- (a top level field) stays untouched for speed
       if depth >= 1 then
         local name = tostring(k)
-        t[k] = function(...)
+        local wrapped = function(...)
           __butter_vm_calls = __butter_vm_calls + 1
           if __butter_vm_calls > __butter_vm_budget then return v(...) end
           local r = table.pack(pcall(v, ...))
@@ -867,6 +867,19 @@ function __butter_wrap_vm_api(t, depth)
             return nil
           end
           return table.unpack(r, 1, r.n)
+        end
+        -- the table is frozen by Luraph: unfreeze, patch, refreeze
+        local ok = pcall(function()
+          if type(setreadonly) == "function" then setreadonly(t, false) end
+          t[k] = wrapped
+          if type(setreadonly) == "function" then setreadonly(t, true) end
+        end)
+        if not ok then
+          pcall(function()
+            if type(__butter_box) == "function" then
+              __butter_box("[Butter] api wrap", "could not patch VM." .. name .. " (table is frozen)", 460, Color3.fromRGB(60, 30, 10))
+            end
+          end)
         end
       end
     end
