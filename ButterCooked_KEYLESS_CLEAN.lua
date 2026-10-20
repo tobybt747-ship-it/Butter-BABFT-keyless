@@ -1112,6 +1112,22 @@ do
   end
 
   -- ------------------------------------------------------------------
+  -- identifyexecutor: the embedded runtime reads it (it is in the
+  -- payload's string pool), and some Luraph builds gate on the executor
+  -- name.  Count the calls so we can see whether it is called once or in
+  -- a loop.  The original function is still what gets called.
+  -- ------------------------------------------------------------------
+  do
+    local real_id = __butter_env.identifyexecutor
+    if type(real_id) == "function" then
+      __butter_env.identifyexecutor = function(...)
+        __butter_bump("identifyexecutor")
+        return real_id(...)
+      end
+    end
+  end
+
+  -- ------------------------------------------------------------------
   -- The UI window is created DISABLED.
   --
   -- Butter's own UI source does:
@@ -1337,6 +1353,10 @@ __butter_envfill = {
 -- (setmetatable({ ["%s"] = ... }, { __index = getfenv((...)) })) and shadow
 -- the __index it relies on.
 function __butter_setfenv(chunk, env)
+  -- COUNT IT.  The embedded runtime installs its environment with setfenv;
+  -- if it calls this in a loop, the counter says so.
+  __butter_count = __butter_count or {}
+  __butter_count.setfenv = (__butter_count.setfenv or 0) + 1
   if type(__butter_real_setfenv) == "function" then
     return __butter_real_setfenv(chunk, env)
   end
