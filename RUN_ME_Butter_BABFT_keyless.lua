@@ -19,6 +19,7 @@
 -- (which opens at the top left).
 local __butter_runner_gui = nil
 local __butter_runner_label = nil
+__butter_runner_stop = false
 local function __butter_runner_panel(text)
   pcall(function()
     if __butter_runner_gui then
@@ -59,6 +60,20 @@ local function __butter_runner_panel(text)
         SG:Destroy()
         __butter_runner_gui = nil
         __butter_runner_label = nil
+      end)
+      local STOP = Instance.new("TextButton")
+      STOP.Size = UDim2.new(0, 70, 0, 26)
+      STOP.Position = UDim2.new(0, 34, 0, 4)
+      STOP.BackgroundColor3 = Color3.fromRGB(150, 60, 40)
+      STOP.BackgroundTransparency = 0.15
+      STOP.TextColor3 = Color3.fromRGB(255, 255, 255)
+      STOP.TextSize = 14
+      STOP.Font = Enum.Font.GothamBold
+      STOP.Text = "STOP"
+      STOP.Parent = L
+      STOP.MouseButton1Click:Connect(function()
+        __butter_runner_stop = true
+        STOP.Text = "STOPPING"
       end)
     end
     SG.Parent = game:GetService("CoreGui")
@@ -935,7 +950,7 @@ do
     local u = tostring(url or "")
     __butter_bump("http")
     local n = __butter_count.http
-    if n <= 4 and type(__butter_box) == "function" then
+    if n <= 4 and __butter_diag ~= false and type(__butter_box) == "function" then
       __butter_net_shown = __butter_net_shown + 1
       local short = u
       if #short > 96 then short = string.sub(short, 1, 96) .. "..." end
@@ -1206,7 +1221,7 @@ do
         end)
         lines[#lines + 1] = "CoreGui: " .. (#names > 0 and table.concat(names, ", ") or "(empty)")
       end
-      if type(__butter_box) == "function" then
+      if type(__butter_box) == "function" and __butter_diag ~= false then
         pcall(function()
           __butter_box("[Butter] verdict " .. tag, table.concat(lines, "\n"),
                        460, Color3.fromRGB(20, 40, 25))
@@ -1920,6 +1935,8 @@ do
 end
 
 
+__butter_diag = true
+
 
 -- The VM resolves the payload's globals through this function, and it calls
 -- it MILLIONS of times (measured: about 150 000 per second, and the whole run
@@ -1956,7 +1973,7 @@ end)
 -- 100 000 global resolutions), then Roblox gets a frame back.
 local __butter_runner_ok = false
 local __butter_runner_err = nil
-local __butter_runner_limit = 900
+local __butter_runner_limit = 3600
 local __butter_RT = task
 if type(__butter_RT) ~= "table" or type(__butter_RT.wait) ~= "function" then
   __butter_RT = { wait = function() end }
@@ -1975,6 +1992,10 @@ while true do
   if t > __butter_runner_limit then
     __butter_runner_err = "the protected script did not finish within "
       .. tostring(__butter_runner_limit) .. " seconds - it was stopped"
+    break
+  end
+  if __butter_runner_stop then
+    __butter_runner_err = "the protected script was stopped by the user"
     break
   end
   __butter_RT.wait()
