@@ -34,8 +34,8 @@ local function __butter_runner_panel(text)
     SG.IgnoreGuiInset = true
     SG.ResetOnSpawn = false
     local L = Instance.new("TextLabel")
-    L.Size = UDim2.new(1, -60, 0, 110)
-    L.Position = UDim2.new(0, 30, 1, -140)
+    L.Size = UDim2.new(1, -60, 0, 240)
+    L.Position = UDim2.new(0, 30, 1, -270)
     L.BackgroundColor3 = Color3.fromRGB(18, 18, 20)
     L.BackgroundTransparency = 0.1
     L.TextColor3 = Color3.fromRGB(120, 220, 140)
@@ -946,10 +946,12 @@ do
   -- one place that decides what a URL gets back
   -- ------------------------------------------------------------------
   local __butter_net_shown = 0
+  __butter_urls = {}
   local function __butter_body_for(url)
     local u = tostring(url or "")
     __butter_bump("http")
     local n = __butter_count.http
+    if #__butter_urls < 40 then __butter_urls[#__butter_urls + 1] = u end
     if n <= 4 and __butter_diag ~= false and type(__butter_box) == "function" then
       __butter_net_shown = __butter_net_shown + 1
       local short = u
@@ -1814,25 +1816,61 @@ while true do
   __butter_RT.wait()
 end
 
-pcall(function()
-  if __butter_runner_gui then __butter_runner_gui:Destroy() end
-end)
-
-if type(__butter_box) == "function" then
+-- The final report.  It goes to THREE places, because a message that is
+-- easy to miss is a message that is lost:
+--   1. the bottom-left panel (kept, not destroyed - it stays until X)
+--   2. the diagnostics panel at the top left
+--   3. a Roblox notification toast
+do
+  local lines = {}
+  local secs = "?"
   pcall(function()
-    local secs = "?"
-    pcall(function()
-      secs = tostring(math.floor((os.clock() - __butter_runner_t0) * 10) / 10)
-    end)
-    if __butter_runner_ok and __butter_runner_err == nil then
-      __butter_box("[Butter] runner",
-        "the protected script finished without throwing."
-        .. "\nCPU time inside the protected script: " .. secs .. " s"
-        .. "\nglobal resolutions: " .. tostring(__butter_calls or 0))
-    else
-      __butter_box("[Butter] runner error", tostring(__butter_runner_err)
-        .. "\nCPU time inside the protected script: " .. secs .. " s"
-        .. "\nglobal resolutions: " .. tostring(__butter_calls or 0))
+    secs = tostring(math.floor((os.clock() - __butter_runner_t0) * 10) / 10)
+  end)
+  if __butter_runner_ok and __butter_runner_err == nil then
+    lines[#lines + 1] = "FINISHED - the protected script ran to the end."
+  else
+    lines[#lines + 1] = "STOPPED / FAILED:"
+    lines[#lines + 1] = tostring(__butter_runner_err)
+  end
+  lines[#lines + 1] = "CPU time: " .. secs .. " s"
+  lines[#lines + 1] = "global resolutions: " .. tostring(__butter_calls or 0)
+  lines[#lines + 1] = "HTTP requests: " .. tostring((__butter_count and __butter_count.http) or 0)
+  local made = {}
+  pcall(function()
+    if type(__butter_made) == "table" then
+      for k, v in pairs(__butter_made) do made[#made + 1] = k .. " x" .. tostring(v) end
     end
+  end)
+  lines[#lines + 1] = "instances created: " .. (#made > 0 and table.concat(made, ", ") or "(none)")
+  do
+    local names = {}
+    pcall(function()
+      if type(__butter_urls) == "table" then
+        for i = 1, #__butter_urls do names[#names + 1] = tostring(__butter_urls[i]) end
+      end
+    end)
+    if #names > 0 then
+      lines[#lines + 1] = "URLs requested:"
+      for i = 1, #names do lines[#lines + 1] = "  " .. names[i] end
+    end
+  end
+  local body = table.concat(lines, "\n")
+  -- 1. the bottom-left panel (it is NOT destroyed any more)
+  __butter_runner_panel("[Butter] " .. body)
+  -- 2. the diagnostics panel at the top left
+  if type(__butter_box) == "function" then
+    pcall(function()
+      __butter_box("[Butter] runner", body)
+    end)
+  end
+  -- 3. a Roblox toast - hard to miss, even if both panels were dismissed
+  pcall(function()
+    local SG = game:GetService("StarterGui")
+    SG:SetCore("SendNotification", {
+      Title = "Butter",
+      Text = tostring(lines[1]) .. "  (" .. secs .. " s, " .. tostring(__butter_calls or 0) .. " resolutions)",
+      Duration = 20,
+    })
   end)
 end
