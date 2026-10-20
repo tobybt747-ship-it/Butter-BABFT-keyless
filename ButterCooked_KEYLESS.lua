@@ -67,6 +67,14 @@ end
 -- FILL MISSING ONLY, so the first source that HAS a name wins and a
 -- sandbox that lacks the standard library can never overwrite it:
 --     _G  ->  getfenv(0)  ->  getgenv()  ->  getrenv()
+--
+-- FAITHFUL MODE (the default):
+--   __butter_env IS the client's real global table, not a copy of it.
+--   The embedded Luraph runtime validates the environment it is given
+--   (it loops forever when it is not satisfied), and the two things it
+--   can see are the table's IDENTITY (getfenv() == _G) and its
+--   metatable.  A copy fails both.  So: use the real table, and add to
+--   it only what is missing.
 local __butter_env = {}
 local function __butter_merge(dst, src)
   if type(src) ~= "table" then return end
@@ -78,6 +86,24 @@ __butter_merge(__butter_env, __butter_globals)
 __butter_merge(__butter_env, __REAL_ENV)
 __butter_merge(__butter_env, __butter_genv)
 __butter_merge(__butter_env, __butter_renv)
+
+if FAITHFUL then
+  -- use the client's real global table, identity intact
+  local real_env = nil
+  pcall(function()
+    if type(getfenv) == "function" then real_env = getfenv(0) end
+  end)
+  if type(real_env) ~= "table" then real_env = _G end
+  if type(real_env) == "table" then
+    for k, v in pairs(__butter_env) do
+      if real_env[k] == nil then pcall(function() real_env[k] = v end) end
+    end
+    __butter_env = real_env
+  end
+  print("environment: the client's REAL global table (identity intact)")
+else
+  print("environment: a snapshot copy")
+end
 
 -- Indexed lookup across every source.  pairs() cannot see metatable
 -- backed members (Roblox locks some tables), so the names that matter
@@ -632,6 +658,9 @@ do
   end
 end
 
+
+__butter_faithful = true
+__butter_diag = true
 -- ------------------------------------------------------------------
 -- Shared on-screen box with a close (X) button.
 --
@@ -902,6 +931,11 @@ do
   local function __butter_wrap_http_service(real)
     if type(real) ~= "table" then return real end
     return setmetatable({}, {
+      -- Roblox's typeof() reads __type out of the metatable, and
+      -- tostring() reads __name.  Without them the proxy is obvious:
+      -- typeof(HttpService) would be "table" instead of "Instance".
+      __type = "Instance",
+      __name = "HttpService",
       __index = function(_, k)
         if k == "RequestAsync" then
           return function(self, url, opts)
@@ -956,6 +990,10 @@ do
       return f
     end
     return setmetatable({}, {
+      -- typeof(game) must say "Instance" and tostring(game) must not say
+      -- "table" - the runtime can tell a proxy from the real DataModel.
+      __type = "Instance",
+      __name = "DataModel",
       __index = function(_, k)
         if k == "GetService" then
           return function(self, name, ...)
@@ -1851,17 +1889,24 @@ do
   -- roughly 25 million times per run, and building a fresh table + metatable
   -- on every miss froze the client.  Nothing else may allocate here either -
   -- no string.lower(), no find() - or the GC thrash comes back.
-  pcall(function()
-    local mt = getmetatable(__butter_env)
-    if mt == nil then
-      setmetatable(__butter_env, {
-        __index = function(t, k)
-          if k == "debug" then return __butter_dbg end
-          return __butter_stub(tostring(k))
-        end,
-      })
-    end
-  end)
+  --
+  -- It is also SKIPPED in faithful mode: there the environment IS the
+  -- client's real global table, and putting a metatable on it (and making
+  -- every missing global non-nil) is exactly the kind of thing the
+  -- embedded runtime can detect.
+  if not __butter_faithful then
+    pcall(function()
+      local mt = getmetatable(__butter_env)
+      if mt == nil then
+        setmetatable(__butter_env, {
+          __index = function(t, k)
+            if k == "debug" then return __butter_dbg end
+            return __butter_stub(tostring(k))
+          end,
+        })
+      end
+    end)
+  end
 
   -- 3. report what is where, on screen
   local function __butter_typeof(v)
@@ -2001,8 +2046,6 @@ do
   pcall(function() __butter_fix_debug(__REAL_ENV) end)
 end
 
-
-__butter_diag = true
 
 
 -- The VM resolves the payload's globals through this function, and it calls
