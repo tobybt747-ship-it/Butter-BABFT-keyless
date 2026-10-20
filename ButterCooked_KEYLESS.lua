@@ -855,10 +855,12 @@ do
   -- one place that decides what a URL gets back
   -- ------------------------------------------------------------------
   local __butter_net_shown = 0
+  __butter_urls = {}
   local function __butter_body_for(url)
     local u = tostring(url or "")
     __butter_bump("http")
     local n = __butter_count.http
+    if #__butter_urls < 40 then __butter_urls[#__butter_urls + 1] = u end
     if n <= 4 and __butter_diag ~= false and type(__butter_box) == "function" then
       __butter_net_shown = __butter_net_shown + 1
       local short = u
@@ -1418,9 +1420,11 @@ end
 do
   local counts = {}
   local order = {}
+  __butter_made = {}
 
   local function __butter_count_new(class)
     counts[class] = (counts[class] or 0) + 1
+    __butter_made[class] = (__butter_made[class] or 0) + 1
     if #order < 40 then order[#order + 1] = class end
   end
 
