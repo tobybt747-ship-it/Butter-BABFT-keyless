@@ -388,17 +388,6 @@ for _, k in ipairs({
 end
 
 -- report what the important ones ended up being
-if type(__butter_box) == "function" then
-  pcall(function()
-    __butter_box("[Butter] env probe 2",
-      "loadstring = " .. tostring(type(__butter_env.loadstring))
-      .. "\nload       = " .. tostring(type(__butter_env.load))
-      .. "\nrequire    = " .. tostring(type(__butter_env.require))
-      .. "\ngetfenv    = " .. tostring(type(__butter_env.getfenv))
-      .. "\ndebug      = " .. tostring(type(__butter_env.debug))
-      .. "\nerror      = " .. tostring(type(__butter_env.error)))
-  end)
-end
 
 -- optional trace hook (off in Roblox, used by the offline test harness)
 local __butter_log = __REAL_ENV.__BUTTER_LOG
@@ -858,6 +847,96 @@ do
         end
       end)
     end)
+  end)
+end
+-- ------------------------------------------------------------------
+-- What did the script actually build?
+--
+-- The protected script now runs to completion without throwing, but
+-- no Butter window is visible.  Two possibilities:
+--   * the window exists but is hidden behind the diagnostics panel
+--   * the window was never created
+--
+-- This counts every Instance the script creates (by class) and, a few
+-- seconds later, lists what ended up in CoreGui.
+-- ------------------------------------------------------------------
+
+do
+  local counts = {}
+  local order = {}
+
+  local function __butter_count_new(class)
+    counts[class] = (counts[class] or 0) + 1
+    if #order < 40 then order[#order + 1] = class end
+  end
+
+  pcall(function()
+    local real_new = Instance.new
+    Instance.new = function(class, parent)
+      __butter_count_new(tostring(class))
+      return real_new(class, parent)
+    end
+  end)
+
+  pcall(function()
+    local real_new = _G and rawget(_G, "Instance") and rawget(rawget(_G, "Instance"), "new")
+    if type(real_new) == "function" then
+      rawget(_G, "Instance").new = function(class, parent)
+        __butter_count_new(tostring(class))
+        return real_new(class, parent)
+      end
+    end
+  end)
+
+  local function __butter_report()
+    local lines = {}
+    for _, c in ipairs(order) do
+      lines[#lines + 1] = c .. " x" .. tostring(counts[c])
+    end
+    if #lines == 0 then lines[1] = "(nothing was created)" end
+
+    -- what is in CoreGui?
+    pcall(function()
+      local cg = game:GetService("CoreGui")
+      for _, child in ipairs(cg:GetChildren()) do
+        local extra = ""
+        if child:IsA("ScreenGui") then
+          local n = 0
+          for _, g in ipairs(child:GetDescendants()) do n = n + 1 end
+          extra = "  (" .. n .. " descendants, visible=" .. tostring(child.Enabled) .. ")"
+        end
+        lines[#lines + 1] = "CoreGui: " .. child.Name .. " [" .. child.ClassName .. "]" .. extra
+      end
+    end)
+
+    -- the key the gate sees
+    pcall(function()
+      if type(getgenv) == "function" then
+        local g = getgenv()
+        lines[#lines + 1] = "getgenv().LDKey = " .. tostring(g.LDKey)
+        lines[#lines + 1] = "getgenv().LD_KEY = " .. tostring(g.LD_KEY)
+      end
+    end)
+
+    if type(__butter_box) == "function" then
+      __butter_box("[Butter] what was built", table.concat(lines, "\n"), 460, Color3.fromRGB(20, 40, 25))
+    end
+  end
+
+  pcall(function()
+    task.delay(3, __butter_report)
+  end)
+end
+-- env probe 2 - what the important globals ended up being
+if type(__butter_box) == "function" then
+  pcall(function()
+    __butter_box("[Butter] env probe 2",
+      "loadstring = " .. tostring(type(__butter_env.loadstring))
+      .. "\\nload       = " .. tostring(type(__butter_env.load))
+      .. "\\nrequire    = " .. tostring(type(__butter_env.require))
+      .. "\\ngetfenv    = " .. tostring(type(__butter_env.getfenv))
+      .. "\\ndebug      = " .. tostring(type(__butter_env.debug))
+      .. "\\nerror      = " .. tostring(type(__butter_env.error)))
   end)
 end
 -- ------------------------------------------------------------------
