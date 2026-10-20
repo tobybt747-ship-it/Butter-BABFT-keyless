@@ -859,7 +859,7 @@ do
     local u = tostring(url or "")
     __butter_bump("http")
     local n = __butter_count.http
-    if n <= 4 and type(__butter_box) == "function" then
+    if n <= 4 and __butter_diag ~= false and type(__butter_box) == "function" then
       __butter_net_shown = __butter_net_shown + 1
       local short = u
       if #short > 96 then short = string.sub(short, 1, 96) .. "..." end
@@ -1130,7 +1130,7 @@ do
         end)
         lines[#lines + 1] = "CoreGui: " .. (#names > 0 and table.concat(names, ", ") or "(empty)")
       end
-      if type(__butter_box) == "function" then
+      if type(__butter_box) == "function" and __butter_diag ~= false then
         pcall(function()
           __butter_box("[Butter] verdict " .. tag, table.concat(lines, "\n"),
                        460, Color3.fromRGB(20, 40, 25))
@@ -1843,6 +1843,8 @@ do
   pcall(function() __butter_fix_debug(__REAL_ENV) end)
 end
 
+
+__butter_diag = true
 
 
 -- The VM resolves the payload's globals through this function, and it calls
