@@ -34,8 +34,8 @@ local function __butter_runner_panel(text)
     SG.IgnoreGuiInset = true
     SG.ResetOnSpawn = false
     local L = Instance.new("TextLabel")
-    L.Size = UDim2.new(1, -60, 0, 240)
-    L.Position = UDim2.new(0, 30, 1, -270)
+    L.Size = UDim2.new(1, -60, 0, 260)
+    L.Position = UDim2.new(0, 30, 1, -290)
     L.BackgroundColor3 = Color3.fromRGB(18, 18, 20)
     L.BackgroundTransparency = 0.1
     L.TextColor3 = Color3.fromRGB(120, 220, 140)
@@ -2150,13 +2150,33 @@ while true do
       end
     end
   end)
+  -- the environment facts that decide whether the runtime can start
+  local sf = "?"
+  pcall(function() sf = tostring(type(__butter_real_setfenv)) end)
+  local sfw = "?"
+  pcall(function() sfw = tostring(__butter_setfenv_works) end)
+  local dbi = "?"
+  local dbg = "?"
+  pcall(function()
+    dbi = tostring(type(debug) == "table" and type(debug.info) or "nil")
+    dbg = tostring(type(debug) == "table" and type(debug.getinfo) or "nil")
+  end)
+  local idn = "?"
+  pcall(function()
+    if type(__butter_env.identifyexecutor) == "function" then
+      idn = tostring(__butter_env.identifyexecutor())
+    end
+  end)
   __butter_runner_panel(string.format(
     "[Butter] protected script running...\n%d s CPU, %s global resolutions"
     .. "\nHTTP requests: %s    instances created: %s"
     .. "\nCoreGui ScreenGuis: %s"
+    .. "\nsetfenv: %s works=%s   debug.info=%s debug.getinfo=%s   executor=%s"
     .. "\nlast URL: %s",
     t, tostring(__butter_calls or 0), tostring(http_n), tostring(made_n),
-    (gui ~= "" and gui or "(none)"), (last ~= "" and last or "(none)")))
+    (gui ~= "" and gui or "(none)"),
+    sf, sfw, dbi, dbg, idn,
+    (last ~= "" and last or "(none)")))
   if t > __butter_runner_limit then
     __butter_runner_err = "the protected script did not finish within "
       .. tostring(__butter_runner_limit) .. " seconds - it was stopped"
