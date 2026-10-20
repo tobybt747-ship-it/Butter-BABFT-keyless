@@ -101,17 +101,24 @@ do
   -- roughly 25 million times per run, and building a fresh table + metatable
   -- on every miss froze the client.  Nothing else may allocate here either -
   -- no string.lower(), no find() - or the GC thrash comes back.
-  pcall(function()
-    local mt = getmetatable(__butter_env)
-    if mt == nil then
-      setmetatable(__butter_env, {
-        __index = function(t, k)
-          if k == "debug" then return __butter_dbg end
-          return __butter_stub(tostring(k))
-        end,
-      })
-    end
-  end)
+  --
+  -- It is also SKIPPED in faithful mode: there the environment IS the
+  -- client's real global table, and putting a metatable on it (and making
+  -- every missing global non-nil) is exactly the kind of thing the
+  -- embedded runtime can detect.
+  if not __butter_faithful then
+    pcall(function()
+      local mt = getmetatable(__butter_env)
+      if mt == nil then
+        setmetatable(__butter_env, {
+          __index = function(t, k)
+            if k == "debug" then return __butter_dbg end
+            return __butter_stub(tostring(k))
+          end,
+        })
+      end
+    end)
+  end
 
   -- 3. report what is where, on screen
   local function __butter_typeof(v)
