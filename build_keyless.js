@@ -415,7 +415,35 @@ end
 //   butter_vmhook.lua    - walks every table the VM owns and wraps its
 //                           pcall/loadstring/error in a Lua function.
 const D = "deobfuscated/Butter_BABFT/";
-const diag = fsx.readFileSync(D + "butter_box.lua", "latin1") + fsx.readFileSync(D + "butter_net.lua", "latin1") + fsx.readFileSync(D + "butter_envfix.lua", "latin1") + fsx.readFileSync(D + "butter_requirefix.lua", "latin1") + fsx.readFileSync(D + "butter_whatbuilt.lua", "latin1") + fsx.readFileSync(D + "butter_envprobe2.lua", "latin1") + fsx.readFileSync(D + "butter_missingglobals.lua", "latin1") + fsx.readFileSync(D + "butter_genvlog.lua", "latin1") + fsx.readFileSync(D + "butter_envshim2.lua", "latin1") + fsx.readFileSync(D + "butter_envshim.lua", "latin1") + fsx.readFileSync(D + "butter_debugshim.lua", "latin1");
+
+// Two flavours of the same build:
+//
+//   node build_keyless.js          -> the DIAGNOSTIC build (what the user is
+//                                     running now): every probe is on screen.
+//   node build_keyless.js clean    -> the CLEAN build: the same key-system
+//                                     removal and the same environment, but
+//                                     with the probes removed.  Only the
+//                                     progress panel (bottom left) and, if
+//                                     something goes wrong, the error survive.
+//
+// The layers that are only there for diagnosis are NOT in the clean build:
+//   butter_whatbuilt.lua   - patches Instance.new globally
+//   butter_envprobe2.lua   - prints the environment probe
+//   butter_missingglobals.lua
+//   butter_genvlog.lua     - puts a metatable on the executor's getgenv() table
+const DIAG_LAYERS = ["butter_box.lua", "butter_net.lua", "butter_envfix.lua",
+  "butter_requirefix.lua", "butter_whatbuilt.lua", "butter_envprobe2.lua",
+  "butter_missingglobals.lua", "butter_genvlog.lua", "butter_envshim2.lua",
+  "butter_envshim.lua", "butter_debugshim.lua"];
+const CLEAN_LAYERS = ["butter_box.lua", "butter_net.lua", "butter_envfix.lua",
+  "butter_requirefix.lua", "butter_envshim2.lua", "butter_envshim.lua",
+  "butter_debugshim.lua"];
+
+const CLEAN = process.argv.includes("clean");
+const layers = CLEAN ? CLEAN_LAYERS : DIAG_LAYERS;
+console.log("mode: " + (CLEAN ? "CLEAN (diagnostics stripped)" : "DIAGNOSTIC"));
+const diag = layers.map((f) => fsx.readFileSync(D + f, "latin1")).join("")
+  + "\n__butter_diag = " + (CLEAN ? "false" : "true") + "\n";
 
 // --- second patch: the VM's own table -------------------------------------
 // The protected file's last statement is  return({...}):B()(...);
@@ -480,7 +508,8 @@ if (!out.includes(":B()(...);")) {
 }
 console.log("VM entry call present: YES");
 
-const dest = "deobfuscated/Butter_BABFT/ButterCooked_KEYLESS.lua";
+const SUFFIX = CLEAN ? "_CLEAN" : "";
+const dest = "deobfuscated/Butter_BABFT/ButterCooked_KEYLESS" + SUFFIX + ".lua";
 fsx.writeFileSync(dest, out, "latin1");
 console.log("wrote " + dest + "  (" + out.length + " bytes), stubbed " + poolNames.length + " identifiers");
 
@@ -515,6 +544,7 @@ const runnerPre = [
   "-- (which opens at the top left).",
   "local __butter_runner_gui = nil",
   "local __butter_runner_label = nil",
+  "__butter_runner_stop = false",
   "local function __butter_runner_panel(text)",
   "  pcall(function()",
   "    if __butter_runner_gui then",
@@ -556,6 +586,20 @@ const runnerPre = [
   "        __butter_runner_gui = nil",
   "        __butter_runner_label = nil",
   "      end)",
+  "      local STOP = Instance.new(\"TextButton\")",
+  "      STOP.Size = UDim2.new(0, 70, 0, 26)",
+  "      STOP.Position = UDim2.new(0, 34, 0, 4)",
+  "      STOP.BackgroundColor3 = Color3.fromRGB(150, 60, 40)",
+  "      STOP.BackgroundTransparency = 0.15",
+  "      STOP.TextColor3 = Color3.fromRGB(255, 255, 255)",
+  "      STOP.TextSize = 14",
+  "      STOP.Font = Enum.Font.GothamBold",
+  "      STOP.Text = \"STOP\"",
+  "      STOP.Parent = L",
+  "      STOP.MouseButton1Click:Connect(function()",
+  "        __butter_runner_stop = true",
+  "        STOP.Text = \"STOPPING\"",
+  "      end)",
   "    end",
   "    SG.Parent = game:GetService(\"CoreGui\")",
   "    __butter_runner_gui = SG",
@@ -581,7 +625,7 @@ const runnerPost = [
   "-- 100 000 global resolutions), then Roblox gets a frame back.",
   "local __butter_runner_ok = false",
   "local __butter_runner_err = nil",
-  "local __butter_runner_limit = 900",
+  "local __butter_runner_limit = 3600",
   "local __butter_RT = task",
   "if type(__butter_RT) ~= \"table\" or type(__butter_RT.wait) ~= \"function\" then",
   "  __butter_RT = { wait = function() end }",
@@ -600,6 +644,10 @@ const runnerPost = [
   "  if t > __butter_runner_limit then",
   "    __butter_runner_err = \"the protected script did not finish within \"",
   "      .. tostring(__butter_runner_limit) .. \" seconds - it was stopped\"",
+  "    break",
+  "  end",
+  "  if __butter_runner_stop then",
+  "    __butter_runner_err = \"the protected script was stopped by the user\"",
   "    break",
   "  end",
   "  __butter_RT.wait()",
@@ -631,9 +679,9 @@ const runnerPost = [
 ].join(NL);
 
 const runner = runnerPre + out + runnerPost;
-fsx.writeFileSync("deobfuscated/Butter_BABFT/RUN_ME_Butter_BABFT_keyless.lua", runner, "latin1");
-fsx.writeFileSync("deobfuscated/Butter_BABFT/Butter_BABFT_keyless_loader.lua", runner, "latin1");
-console.log("wrote RUN_ME_Butter_BABFT_keyless.lua  (" + runner.length + " bytes, self-contained)");
+fsx.writeFileSync("deobfuscated/Butter_BABFT/RUN_ME_Butter_BABFT_keyless" + SUFFIX + ".lua", runner, "latin1");
+if (!CLEAN) fsx.writeFileSync("deobfuscated/Butter_BABFT/Butter_BABFT_keyless_loader.lua", runner, "latin1");
+console.log("wrote RUN_ME_Butter_BABFT_keyless" + SUFFIX + ".lua  (" + runner.length + " bytes, self-contained)");
 
 // the payload must be untouched
 const re = /\[(=*)\[([\s\S]{200,}?)\]\1\]/g;
