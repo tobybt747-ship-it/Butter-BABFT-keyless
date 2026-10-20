@@ -76,6 +76,8 @@ if type(__butter_real_loadstring) == "function" then
 end
 if type(__butter_real_load) == "function" then
   __butter_env.load = __butter_real_load
+elseif type(__butter_env.loadstring) == "function" then
+  __butter_env.load = __butter_env.loadstring
 end
 
 -- names the script references that this environment does not provide
@@ -419,10 +421,30 @@ local function __butter_is_key_url(url)
   return (u:find("luadefender", 1, true) ~= nil) or (u:find("/key", 1, true) ~= nil)
 end
 
+-- Butter's UI loads the LenyUI modules from
+--   https://raw.githubusercontent.com/tip52/Leny-UI/refs/heads/main/Modules/*.lua
+-- and that repository is gone (404), so the UI can never be built.
+-- We publish the same modules in our own repository and redirect the
+-- payload's requests to them.
+local __butter_repo_base = "https://raw.githubusercontent.com/tobybt747-ship-it/Butter-BABFT-keyless/refs/heads/main/LenyUI/Modules/"
+
+local function __butter_rewrite_url(url)
+  local u = tostring(url or "")
+  local file = string.match(u, "Modules/([^/?%s]+%.lua)")
+  if file and (string.find(u, "Leny%-UI", 1) or string.find(u, "LenyUI", 1)) then
+    return __butter_repo_base .. file
+  end
+  return u
+end
+
 local function __butter_body_for(url)
   if __butter_is_key_url(url) then return __butter_valid_body end
+  local target = __butter_rewrite_url(url)
+  if target ~= tostring(url or "") then
+    __butter_trace("  -> redirected to " .. target)
+  end
   if type(__butter_real_httpget) == "function" then
-    local ok, res = pcall(function() return __butter_real_httpget(__REAL_ENV.game, url) end)
+    local ok, res = pcall(function() return __butter_real_httpget(__REAL_ENV.game, target) end)
     if ok and type(res) == "string" and #res > 0 then
       __butter_trace("  -> real file (" .. #res .. " bytes)")
       return res
