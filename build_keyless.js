@@ -84,15 +84,27 @@ pcall(function()
 end)
 local __butter_key = "LD12345678999999"
 
+-- A stub for a name the client does not provide.
+--
+-- IMPORTANT: the stub is CACHED.  The VM resolves a global roughly 25 million
+-- times per run, and every miss used to build a brand new table + metatable +
+-- two closures.  That is millions of allocations, and it froze the client.
+-- One stub per distinct name, one shared no-op function, no allocation.
+local __butter_stub_cache = {}
+local __butter_noop = function() return nil end
 local function __butter_stub(name)
-  return setmetatable({}, {
+  local s = __butter_stub_cache[name]
+  if s ~= nil then return s end
+  s = setmetatable({}, {
     __index = function(_, k)
-      if k == "new" then return function(...) return __butter_stub(name .. ".new") end end
-      return function(...) return nil end
+      if k == "new" then return __butter_stub(name .. ".new") end
+      return __butter_noop
     end,
     __call = function() return nil end,
     __tostring = function() return tostring(name) end,
   })
+  __butter_stub_cache[name] = s
+  return s
 end
 
 -- plain snapshot: no metamethod on the hot path
@@ -372,8 +384,17 @@ end
 
 `;
 
+// The diagnostic layers that are spliced into the header.
+//
+// DELIBERATELY NOT INCLUDED (they froze the client once the VM actually ran):
+//   butter_nonfatal.lua  - swallows error() inside the VM; it also hid the
+//                           real failure.  Errors now propagate and are shown.
+//   butter_errhook.lua   - wraps pcall/xpcall with table.pack on EVERY call.
+//   butter_rawset.lua    - wraps rawset.
+//   butter_vmhook.lua    - walks every table the VM owns and wraps its
+//                           pcall/loadstring/error in a Lua function.
 const D = "deobfuscated/Butter_BABFT/";
-const diag = fsx.readFileSync(D + "butter_box.lua", "latin1") + fsx.readFileSync(D + "butter_net.lua", "latin1") + fsx.readFileSync(D + "butter_envfix.lua", "latin1") + fsx.readFileSync(D + "butter_nonfatal.lua", "latin1") + fsx.readFileSync(D + "butter_rawset.lua", "latin1") + fsx.readFileSync(D + "butter_whatbuilt.lua", "latin1") + fsx.readFileSync(D + "butter_envprobe2.lua", "latin1") + fsx.readFileSync(D + "butter_missingglobals.lua", "latin1") + fsx.readFileSync(D + "butter_genvlog.lua", "latin1") + fsx.readFileSync(D + "butter_vmhook.lua", "latin1") + fsx.readFileSync(D + "butter_requirefix.lua", "latin1") + fsx.readFileSync(D + "butter_errhook.lua", "latin1") + fsx.readFileSync(D + "butter_envshim2.lua", "latin1") + fsx.readFileSync(D + "butter_envshim.lua", "latin1") + fsx.readFileSync(D + "butter_debugshim.lua", "latin1");
+const diag = fsx.readFileSync(D + "butter_box.lua", "latin1") + fsx.readFileSync(D + "butter_net.lua", "latin1") + fsx.readFileSync(D + "butter_envfix.lua", "latin1") + fsx.readFileSync(D + "butter_requirefix.lua", "latin1") + fsx.readFileSync(D + "butter_whatbuilt.lua", "latin1") + fsx.readFileSync(D + "butter_envprobe2.lua", "latin1") + fsx.readFileSync(D + "butter_missingglobals.lua", "latin1") + fsx.readFileSync(D + "butter_genvlog.lua", "latin1") + fsx.readFileSync(D + "butter_envshim2.lua", "latin1") + fsx.readFileSync(D + "butter_envshim.lua", "latin1") + fsx.readFileSync(D + "butter_debugshim.lua", "latin1");
 
 // --- second patch: the VM's own table -------------------------------------
 // The protected file's last statement is  return({...}):B()(...);
@@ -393,27 +414,21 @@ let patchedSrc = src.replace(needle, ",n=__butter_getfenv,");
       patchedSrc.slice(0, vmHead) +
       "local __butter_P=({" +
       patchedSrc.slice(vmHead + "return({".length, vmTail) +
-      "})__butter_P[\"require\"]=__butter_require;__butter_P[\"debug\"]=__butter_dbg;"
+      "});"
+      + "__butter_P[\"require\"]=__butter_require;"
+      + "__butter_P[\"debug\"]=__butter_dbg;"
       + "__butter_P[\"getfenv\"]=function(...) return __butter_env end;"
       + "__butter_P[\"setfenv\"]=__butter_setfenv;"
-      + "__butter_P[\"getinfo\"]=function(l,w,o) return __butter_dbginfo2(l,w,o) end;"
-      + "__butter_P[\"traceback\"]=function(m,l) return tostring(m) end;"
-      + "__butter_P[\"error\"]=__butter_swallow;"
+      // NOTE: nothing else is forced onto the VM's table, and no __newindex
+      // guard is installed.  Walking the VM's own tables and wrapping its
+      // pcall/error (butter_vmhook.lua) turned the VM's native calls into Lua
+      // calls and froze the client - the VM resolves a global ~25 million
+      // times per run.
       + "setmetatable(__butter_P,{__index=function(t,k) "
       + "if k==\"require\" then return __butter_require end; "
       + "if k==\"Require\" then return setmetatable({},{__index=function(_,kk) if kk==\"require\" then return __butter_require end; return nil end}) end; "
       + "if k==\"debug\" then return __butter_dbg end; "
-      + "if k==\"pcall\" then return __butter_vm_pcall end; "
-      + "if k==\"Pcall\" then return setmetatable({},{__index=function(_,kk) if kk==\"pcall\" then return __butter_vm_pcall end; return nil end}) end; "
-      + "if k==\"xpcall\" then return __butter_vm_xpcall end; "
-      + "if k==\"error\" then return __butter_swallow end; "
-      + "if k==\"Error\" then return setmetatable({},{__index=function(_,kk) if kk==\"error\" then return __butter_vm_error end; return nil end}) end; "
-      + "if k==\"getfenv\" then return function(...) return __butter_env end end; "
-      + "if k==\"setfenv\" then return __butter_setfenv end; "
-      + "if k==\"getinfo\" then return function(l,w,o) return __butter_dbginfo2(l,w,o) end end; "
-      + "return nil end, "
-      + "__newindex=function(t,k,v) if k==\"require\" then v=__butter_require end; "
-      + "if type(v)==\"table\" then v=__butter_guard_table(v) end; rawset(t,k,v) end});"
+      + "return nil end});"
       + "return __butter_P:B()(...);" +
       suffix;
     console.log("VM table patched: require/debug forced onto the VM table");
@@ -469,6 +484,55 @@ const runnerPre = [
   "  (this executor has no console).",
   "]]",
   "",
+  "-- A panel drawn BEFORE the protected script starts.  The Luraph VM blocks",
+  "-- Roblox's main thread while it runs, so this is the only thing that can",
+  "-- be on screen during that time.  It sits at the BOTTOM left so it never",
+  "-- covers the Butter window (which opens at the top left).",
+  "do",
+  "  local function __butter_runner_panel(text, colour)",
+  "    pcall(function()",
+  "      local SG = Instance.new(\"ScreenGui\")",
+  "      SG.Name = \"ButterRunner\"",
+  "      SG.DisplayOrder = 99998",
+  "      SG.IgnoreGuiInset = true",
+  "      SG.ResetOnSpawn = false",
+  "      local L = Instance.new(\"TextLabel\")",
+  "      L.Size = UDim2.new(1, -60, 0, 110)",
+  "      L.Position = UDim2.new(0, 30, 1, -140)",
+  "      L.BackgroundColor3 = Color3.fromRGB(18, 18, 20)",
+  "      L.BackgroundTransparency = 0.1",
+  "      L.TextColor3 = colour or Color3.fromRGB(120, 220, 140)",
+  "      L.TextSize = 15",
+  "      L.TextWrapped = true",
+  "      L.TextXAlignment = Enum.TextXAlignment.Left",
+  "      L.TextYAlignment = Enum.TextYAlignment.Top",
+  "      L.Text = text",
+  "      L.Parent = SG",
+  "      do",
+  "        local X = Instance.new(\"TextButton\")",
+  "        X.Size = UDim2.new(0, 26, 0, 26)",
+  "        X.Position = UDim2.new(1, -34, 0, 4)",
+  "        X.BackgroundColor3 = Color3.fromRGB(160, 40, 40)",
+  "        X.BackgroundTransparency = 0.15",
+  "        X.TextColor3 = Color3.fromRGB(255, 255, 255)",
+  "        X.TextSize = 18",
+  "        X.Font = Enum.Font.GothamBold",
+  "        X.Text = \"X\"",
+  "        X.Parent = L",
+  "        X.MouseButton1Click:Connect(function() SG:Destroy() end)",
+  "      end",
+  "      SG.Parent = game:GetService(\"CoreGui\")",
+  "      __butter_runner_gui = SG",
+  "    end)",
+  "  end",
+  "  __butter_runner_panel(\"[Butter] starting the protected script...\"",
+  "    .. \"\\nThe Luraph VM blocks Roblox while it runs, so the game may look frozen\"",
+  "    .. \" for a while.  Wait for it to come back.\")",
+  "end",
+  "",
+  "local __butter_runner_t0 = 0",
+  "pcall(function() __butter_runner_t0 = os.clock() end)",
+  "",
   "local __butter_runner_ok, __butter_runner_err = pcall(function(...)",
   "",
 ].join(NL);
@@ -477,12 +541,22 @@ const runnerPost = [
   "",
   "end)",
   "",
+  "pcall(function()",
+  "  if __butter_runner_gui then __butter_runner_gui:Destroy() end",
+  "end)",
+  "",
   "if type(__butter_box) == \"function\" then",
   "  pcall(function()",
+  "    local secs = \"?\"",
+  "    pcall(function()",
+  "      secs = tostring(math.floor((os.clock() - __butter_runner_t0) * 10) / 10)",
+  "    end)",
   "    if __butter_runner_ok then",
-  "      __butter_box(\"[Butter] runner\", \"the protected script finished without throwing.\")",
+  "      __butter_box(\"[Butter] runner\", \"the protected script finished without throwing.\"",
+  "        .. \"\\nCPU time inside the protected script: \" .. secs .. \" s\")",
   "    else",
-  "      __butter_box(\"[Butter] runner error\", tostring(__butter_runner_err))",
+  "      __butter_box(\"[Butter] runner error\", tostring(__butter_runner_err)",
+  "        .. \"\\nCPU time inside the protected script: \" .. secs .. \" s\")",
   "    end",
   "  end)",
   "end",
