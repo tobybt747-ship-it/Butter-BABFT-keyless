@@ -134,6 +134,46 @@ It passes. **Run it after every change to the header.**
 
 ---
 
+## 2c. The freeze is the SCRIPT, not our patches - measured
+
+The client froze for good. Two hypotheses: (a) our instrumentation, (b) the
+Luraph VM itself. Both were tested **offline** in the Luau CLI against a mocked
+Roblox environment (`make_bench.js` -> `bench_ours.luau` / `bench_original.luau`):
+
+| build | time to reach 2 000 000 global resolutions |
+|---|---|
+| **the original, unmodified `butter_cooked.lua`** | **13.0 s** |
+| **our patched build** | **13.6 s** |
+
+**Our environment patch costs about 5 %.** The VM is simply this slow: it
+resolves a global roughly **150 000 times per second**, and it needs *tens of
+millions* of resolutions to finish. The old note that the harness "needed 30+
+minutes" was only because it logged every single `getfenv` call into a 280 MB
+log.
+
+So the freeze is **inherent to the protected script**. Anyone running Butter on
+an executor waits for it too - the difference is that they expect it.
+
+### What we changed about it
+
+The VM blocks Roblox's main thread while it works, which is why the game
+"stopped responding". The runner now runs the protected script **inside a
+coroutine** and the VM **yields back to Roblox every 50 000 resolutions**, so:
+
+* the game keeps rendering and stays responsive;
+* the panel at the bottom-left shows the elapsed CPU time and the number of
+  resolutions, so the wait is visible instead of mysterious;
+* there is a hard limit (600 s) after which the run is stopped and reported,
+  so a hang can never be an infinite freeze.
+
+**The yield is safe** - verified offline (`make_runner_test.js`): the VM was
+suspended and resumed 60 times in a row and kept running correctly
+(`yields=60 calls=3000001`). The yield only happens inside the runner's own
+coroutine (`coroutine.running() == __butter_main_co`), so the payload's own
+coroutines are never disturbed.
+
+---
+
 ## 3. What the key system actually is
 
 * `03_main_loader.lua` (Butter's own plain source, harvested from
