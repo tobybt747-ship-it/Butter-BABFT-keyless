@@ -86,6 +86,54 @@ One commit-pinned URL, one fetch, no second request, no cache in the way.
 
 ---
 
+## 2b. The third bug: the instrumentation froze Roblox
+
+With the VM actually running for the first time, the client **froze**. The cause
+was our own instrumentation, not the script:
+
+| hazard | why it froze the client |
+|---|---|
+| `__butter_stub()` built a **new** table + metatable + 2 closures on every miss | the VM resolves a global **~25 million times** per run; a few percent of misses = millions of allocations → GC thrash |
+| `butter_vmhook.lua` walked every table the VM owns and wrapped its `pcall` / `loadstring` / `error` in a **Lua** function | a native call became a Lua call + 2 table allocations, on the VM's hot path |
+| `butter_rawset.lua` wrapped `rawset` | same, on a hot path |
+| `butter_errhook.lua` wrapped `pcall` / `xpcall` with `table.pack` | same |
+| `butter_nonfatal.lua` swallowed `error()` inside the VM | it also **hid the real failure**, so the script continued in a broken state |
+
+**The rule this taught us: the Luraph VM's hot path must stay native.**
+Nothing may wrap `pcall`, `rawset`, `error` or `loadstring` for the VM, and
+every allocation on a global lookup must be cached.
+
+What the build looks like now:
+
+* the stub cache (`__butter_stub_cache`) — one stub per distinct name, one
+  shared no-op function;
+* `error()` is **not** swallowed — a failure now propagates to the runner's
+  `pcall` and the real message is shown on screen;
+* no `pcall` / `xpcall` / `rawset` / VM-table wrapping anywhere;
+* the `game` proxy caches its bound methods, and the `HttpService` proxy is
+  created once.
+
+### Offline smoke test (`make_smoke.js` → `luau.exe hdr_smoke.luau`)
+
+The VM cannot run offline (30+ minutes), but **the whole header can**. The
+smoke test extracts everything before the VM's table constructor, runs it in
+the Luau CLI against a mocked Roblox/executor environment, and asserts:
+
+```
+game/workspace/Instance/task present, debug.info present, require present
+key in env and in getgenv()            -> LD12345678999999
+HttpService:RequestAsync                -> Success, 549-byte body
+JSONDecode(body).valid/.key/[1]/keys[1] -> all good
+LenyUI module URL                      -> rewritten to our repo, fetched for real
+a missing global                       -> the SAME cached stub object
+error()                                -> propagates (not swallowed)
+request() / http.get()                 -> the valid body
+```
+
+It passes. **Run it after every change to the header.**
+
+---
+
 ## 3. What the key system actually is
 
 * `03_main_loader.lua` (Butter's own plain source, harvested from
