@@ -1346,8 +1346,71 @@ function __butter_dbginfo2(level, what, options)
   }
 end
 
--- the client's real setfenv, captured before we replace it
-__butter_real_setfenv = (_G and rawget(_G, "setfenv")) or (rawget(__REAL_ENV, "setfenv"))
+-- The client's setfenv.
+--
+-- THIS MUST BE CAPTURED WITH INDEXED ACCESS.  rawget() returns nil on
+-- Roblox's locked tables even when the member exists, and a setfenv that
+-- does nothing is fatal: the embedded Luraph runtime installs its own
+-- environment with
+--     setfenv(function(...) return %s(...) end,
+--              setmetatable({ ["%s"] = ... }, { __index = getfenv((...)) }))
+-- (that template is string #6072 in the payload's string pool).  With
+-- setfenv neutralised the runtime never gets its environment and its
+-- initialisation spins forever - 200 million global resolutions and not one
+-- instance created.
+__butter_real_setfenv = nil
+do
+  local ok, s = pcall(function() return _G and _G.setfenv end)
+  if ok and type(s) == "function" then __butter_real_setfenv = s end
+end
+if __butter_real_setfenv == nil then
+  pcall(function()
+    local s = __REAL_ENV.setfenv
+    if type(s) == "function" then __butter_real_setfenv = s end
+  end)
+end
+if __butter_real_setfenv == nil then
+  pcall(function()
+    local s = __butter_env.setfenv
+    if type(s) == "function" then __butter_real_setfenv = s end
+  end)
+end
+
+-- does it actually WORK?  (a setfenv that silently does nothing is worse
+-- than no setfenv at all)
+__butter_setfenv_works = false
+pcall(function()
+  if type(__butter_real_setfenv) == "function" then
+    local probe = { __butter_probe = 42 }
+    local f = function() return __butter_probe end
+    __butter_real_setfenv(f, probe)
+    __butter_setfenv_works = (f() == 42)
+  end
+end)
+
+-- if it does not work, try the Luau way: a function's environment IS its
+-- _ENV upvalue, and debug.setupvalue can write it when the client has it.
+if type(__butter_real_setfenv) ~= "function" or not __butter_setfenv_works then
+  local function __butter_setfenv_luau(f, t)
+    pcall(function()
+      if type(debug) == "table" and type(debug.setupvalue) == "function" then
+        local i = 1
+        while true do
+          local n = debug.info(f, "u", i)
+          if not n then break end
+          if n == "_ENV" then
+            debug.setupvalue(f, i, t)
+            return
+          end
+          i = i + 1
+        end
+      end
+    end)
+    return f
+  end
+  __butter_real_setfenv = __butter_setfenv_luau
+  __butter_setfenv_works = (type(debug) == "table" and type(debug.setupvalue) == "function")
+end
 
 -- Everything the runtime needs, in case the VM hands us an environment
 -- of its own that lacks them.
@@ -1357,18 +1420,23 @@ __butter_envfill = {
   "ButterKey", "BUTTER_KEY", "ld_key", "ldkey",
 }
 
--- setfenv(chunk, env): keep the environment the VM asked for, but make
--- sure it also carries the debug library and friends, then apply it.
+-- setfenv(chunk, env): hand it straight to the client's own setfenv.
+--
+-- The environment-filling fallback is only used when the client has no
+-- working setfenv at all.  Filling it unconditionally would put direct
+-- keys on the environment the runtime builds for itself
+-- (setmetatable({ ["%s"] = ... }, { __index = getfenv((...)) })) and shadow
+-- the __index it relies on.
 function __butter_setfenv(chunk, env)
+  if type(__butter_real_setfenv) == "function" then
+    return __butter_real_setfenv(chunk, env)
+  end
   if type(env) == "table" then
     for _, k in ipairs(__butter_envfill) do
       if env[k] == nil and __butter_env[k] ~= nil then
         pcall(function() env[k] = __butter_env[k] end)
       end
     end
-  end
-  if type(__butter_real_setfenv) == "function" then
-    return __butter_real_setfenv(chunk, env)
   end
   return nil
 end
@@ -1668,6 +1736,18 @@ if type(__butter_box) == "function" then
       .. string.char(10) .. "getgenv    = " .. t(__butter_env.getgenv)
       .. string.char(10) .. "table      = " .. t(__butter_env.table)
       .. string.char(10) .. "string     = " .. t(__butter_env.string))
+  end)
+end
+
+-- THE setfenv question.  The embedded Luraph runtime installs its own
+-- environment with setfenv; without a working one it never starts.
+if type(__butter_box) == "function" then
+  pcall(function()
+    __butter_box("[Butter] setfenv",
+      "client setfenv found : " .. tostring(type(__butter_real_setfenv))
+      .. string.char(10) .. "it actually works   : " .. tostring(__butter_setfenv_works)
+      .. string.char(10) .. "debug.setupvalue    : " .. tostring(type(debug) == "table" and type(debug.setupvalue) or "nil")
+      .. string.char(10) .. "debug.info          : " .. tostring(type(debug) == "table" and type(debug.info) or "nil"))
   end)
 end
 -- which of the script's names this client does not provide
