@@ -1845,7 +1845,28 @@ end
 
 
 
+-- The VM resolves the payload's globals through this function, and it calls
+-- it MILLIONS of times (measured: about 150 000 per second, and the whole run
+-- needs tens of millions).  So it does the absolute minimum:
+--   * it returns a plain table (no proxy, no metamethod on the hot path)
+--   * it yields back to Roblox every __butter_yield_every calls, so the game
+--     keeps running instead of freezing for minutes while the Luraph VM
+--     grinds through its bytecode
+-- The yield only happens inside the runner's own coroutine, so the payload's
+-- own coroutines are never disturbed.
+__butter_calls = 0
+__butter_yield_every = 50000
 local function __butter_getfenv()
+  __butter_calls = __butter_calls + 1
+  if __butter_yield_every > 0 and (__butter_calls % __butter_yield_every) == 0 then
+    local co = __butter_main_co
+    if co and type(coroutine) == "table" and type(coroutine.running) == "function"
+       and coroutine.running() == co then
+      -- Luau can yield across pcall; if this particular call site cannot
+      -- yield, the error is swallowed and the VM simply carries on.
+      pcall(function() coroutine.yield() end)
+    end
+  end
   return __butter_env
 end
 
