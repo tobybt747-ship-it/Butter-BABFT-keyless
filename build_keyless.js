@@ -398,6 +398,12 @@ local function __butter_getfenv()
       -- Luau can yield across pcall; if this particular call site cannot
       -- yield, the error is swallowed and the VM simply carries on.
       pcall(function() coroutine.yield() end)
+      -- the script may have built its window and left it disabled
+      if type(__butter_enable_ui) == "function" then
+        if (__butter_calls % (__butter_yield_every * 10)) == 0 then
+          pcall(__butter_enable_ui)
+        end
+      end
     end
   end
   return __butter_env
