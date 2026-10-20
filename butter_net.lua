@@ -397,6 +397,56 @@ do
   end
 
   -- ------------------------------------------------------------------
+  -- The UI window is created DISABLED.
+  --
+  -- Butter's own UI source does:
+  --     ScreenGui.Enabled = false
+  --     ScreenGui.Parent = cloneref(game:GetService("CoreGui"))
+  -- and only turns it on at the very END of its start-up.  If the script
+  -- never reaches that last line - because it parks in a long loop - the
+  -- window is fully built and completely INVISIBLE.
+  --
+  -- So: remember what was in CoreGui before the script started, and while it
+  -- runs, switch on any ScreenGui it adds.  Only NEW ones are touched, so
+  -- nothing of the user's is affected.
+  -- ------------------------------------------------------------------
+  do
+    __butter_cgui_before = {}
+    pcall(function()
+      local cg = game:GetService("CoreGui")
+      for _, ch in ipairs(cg:GetChildren()) do __butter_cgui_before[ch] = true end
+    end)
+  end
+
+  function __butter_enable_ui()
+    if __butter_diag == false then return end
+    pcall(function()
+      local cg = game:GetService("CoreGui")
+      for _, ch in ipairs(cg:GetChildren()) do
+        if not __butter_cgui_before[ch] then
+          __butter_cgui_before[ch] = true
+          local ok, isgui = pcall(function() return ch:IsA("ScreenGui") end)
+          if ok and isgui then
+            local changed = false
+            pcall(function()
+              if not ch.Enabled then ch.Enabled = true; changed = true end
+            end)
+            if changed then
+              __butter_bump("ui_enabled")
+              if type(__butter_box) == "function" then
+                pcall(function()
+                  __butter_box("[Butter] window switched on",
+                    "a ScreenGui the script created was left disabled: " .. tostring(ch.Name))
+                end)
+              end
+            end
+          end
+        end
+      end
+    end)
+  end
+
+  -- ------------------------------------------------------------------
   -- the verdict: did the protected script start at all?
   -- ------------------------------------------------------------------
   do
