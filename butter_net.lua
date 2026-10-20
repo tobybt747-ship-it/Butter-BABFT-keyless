@@ -397,6 +397,22 @@ do
   end
 
   -- ------------------------------------------------------------------
+  -- identifyexecutor: the embedded runtime reads it (it is in the
+  -- payload's string pool), and some Luraph builds gate on the executor
+  -- name.  Count the calls so we can see whether it is called once or in
+  -- a loop.  The original function is still what gets called.
+  -- ------------------------------------------------------------------
+  do
+    local real_id = __butter_env.identifyexecutor
+    if type(real_id) == "function" then
+      __butter_env.identifyexecutor = function(...)
+        __butter_bump("identifyexecutor")
+        return real_id(...)
+      end
+    end
+  end
+
+  -- ------------------------------------------------------------------
   -- The UI window is created DISABLED.
   --
   -- Butter's own UI source does:
