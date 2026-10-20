@@ -1391,3 +1391,66 @@ the header has run).
   finds **zero** hits in the 1,058,064-byte blob). Patching the bytecode is
   therefore not possible without first decrypting the code with the VM's own
   key - which is why the environment route is the only viable one.
+
+### 12.7 The pool IS the nested runtime's vocabulary
+
+The payload's string table is one continuous table. The first ~7,400 bytes are
+the **embedded Luraph runtime's** standard-library vocabulary, in order:
+
+```
+string(112) bit32(187) cancel(368) writeu32(538) function(576) pack(761)
+find(807) spawn(830) abs(872) copy(966) close(1193) buffer(1240) char(1248)
+select(1257) concat(1274) debug(1313) workspace(1375) yield(3820) game(3884)
+rep(3919) gmatch(3958) getmetatable(4053) iscclosure(4078) bnot(4107)
+next(4127) info(4136) currentline(4142) error(4258) number(4265) userdata(4418)
+rshift(4502) insert(4524) pcall(4552) wrap(4601) assert(4637) isyieldable(4671)
+getfenv(4704) xpcall(4773) defer(4803) namewhat(4839) lshift(4880) tonumber(4897)
+getinfo(4933) rawset(4953) new(4964) rawget(5003) tostring(5011) sub(5194)
+writeu8(5261) nparams(5270) running(5331) linedefined(5375) unpack(5519)
+isvararg(5600) wait(5637) typeof(5646) source(5783) setfenv(5791) readu32(5868)
+short_src(6032) what(6203) type(6311) byte(6395) task(6438) band(6458) utf8(6469)
+format(6510) traceback(6569) delay(6674) table(6754) setmetatable(6850)
+create(6864) coroutine(6904) match(6979) gsub(6986) math(7116) bxor(7122)
+status(7152) boolean(7160) resume(7270) loadstring(7349) islclosure(7361)
+```
+
+Everything the runtime needs to build a stack trace is there:
+`debug.info`, `debug.getinfo`, and the result fields
+`currentline / source / short_src / linedefined / lastlinedefined / namewhat /
+nparams / isvararg / what` — plus `getfenv` / `setfenv`.
+
+**Therefore the failing expression really is `debug.info`, and `debug` is nil
+in the environment the runtime resolves it from.**
+
+### 12.8 Why the global `debug` shim could not work
+
+In Roblox, `getfenv()` with no argument returns **the calling function's**
+environment. Inside the VM that is the VM's *own private* environment - not
+the environment we control. So the runtime's `local env = getfenv()` picks up
+a table that has no `debug`, and `debug.info` explodes.
+
+Fix (`butter_envfix.lua`): install the whole family into every environment
+the payload can reach -
+
+| name | installed as |
+|---|---|
+| `getfenv()` | returns the environment we control |
+| `setfenv()` | no-op, so the payload cannot be moved out of it |
+| `getinfo()` | Lua 5.1 style global, returns a `debug.info()` result |
+| `traceback()` | global form |
+| `debug` | the genuine library when it has `.info`, otherwise a wrapper |
+
+...on `__butter_env`, `_G`, `getgenv()` **and the VM's own table** (the last
+one is patched in at source level, because the VM's table only exists after
+the header has run).
+
+### 12.9 Two lessons that cost time
+
+* `rawget(_G.debug, "info")` is **nil on Roblox** even though `debug.info`
+  works - the `debug` table is locked and its members are metatable-backed.
+  Always probe with indexed access (`t.info`), never `rawget`.
+* The payload's **code section is encrypted** and string references are
+  **hashes**, not pool indices (a word-aligned search for 4136 / 1313 / 4142
+  finds **zero** hits in the 1,058,064-byte blob). Patching the bytecode is
+  therefore not possible without first decrypting the code with the VM's own
+  key - which is why the environment route is the only viable one.
