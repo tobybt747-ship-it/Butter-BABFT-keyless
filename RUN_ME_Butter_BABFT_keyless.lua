@@ -1203,6 +1203,22 @@ do
   end
 
   -- ------------------------------------------------------------------
+  -- identifyexecutor: the embedded runtime reads it (it is in the
+  -- payload's string pool), and some Luraph builds gate on the executor
+  -- name.  Count the calls so we can see whether it is called once or in
+  -- a loop.  The original function is still what gets called.
+  -- ------------------------------------------------------------------
+  do
+    local real_id = __butter_env.identifyexecutor
+    if type(real_id) == "function" then
+      __butter_env.identifyexecutor = function(...)
+        __butter_bump("identifyexecutor")
+        return real_id(...)
+      end
+    end
+  end
+
+  -- ------------------------------------------------------------------
   -- The UI window is created DISABLED.
   --
   -- Butter's own UI source does:
@@ -1428,6 +1444,10 @@ __butter_envfill = {
 -- (setmetatable({ ["%s"] = ... }, { __index = getfenv((...)) })) and shadow
 -- the __index it relies on.
 function __butter_setfenv(chunk, env)
+  -- COUNT IT.  The embedded runtime installs its environment with setfenv;
+  -- if it calls this in a loop, the counter says so.
+  __butter_count = __butter_count or {}
+  __butter_count.setfenv = (__butter_count.setfenv or 0) + 1
   if type(__butter_real_setfenv) == "function" then
     return __butter_real_setfenv(chunk, env)
   end
@@ -2167,15 +2187,22 @@ while true do
       idn = tostring(__butter_env.identifyexecutor())
     end
   end)
+  local setfenv_n = 0
+  local ide_n = 0
+  pcall(function()
+    setfenv_n = (__butter_count and __butter_count.setfenv) or 0
+    ide_n = (__butter_count and __butter_count.identifyexecutor) or 0
+  end)
   __butter_runner_panel(string.format(
     "[Butter] protected script running...\n%d s CPU, %s global resolutions"
     .. "\nHTTP requests: %s    instances created: %s"
     .. "\nCoreGui ScreenGuis: %s"
     .. "\nsetfenv: %s works=%s   debug.info=%s debug.getinfo=%s   executor=%s"
+    .. "\nsetfenv calls: %s   identifyexecutor calls: %s"
     .. "\nlast URL: %s",
     t, tostring(__butter_calls or 0), tostring(http_n), tostring(made_n),
     (gui ~= "" and gui or "(none)"),
-    sf, sfw, dbi, dbg, idn,
+    sf, sfw, dbi, dbg, idn, tostring(setfenv_n), tostring(ide_n),
     (last ~= "" and last or "(none)")))
   __butter_runner_last = __butter_runner_label and __butter_runner_label.Text or ""
   -- and the diagnostics, in the SAME panel: the separate top-left box is
