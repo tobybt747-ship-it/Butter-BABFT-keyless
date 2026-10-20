@@ -947,10 +947,12 @@ do
   -- ------------------------------------------------------------------
   local __butter_net_shown = 0
   __butter_urls = {}
+  __butter_last_url = ""
   local function __butter_body_for(url)
     local u = tostring(url or "")
     __butter_bump("http")
     local n = __butter_count.http
+    __butter_last_url = u
     if #__butter_urls < 40 then __butter_urls[#__butter_urls + 1] = u end
     if n <= 4 and __butter_diag ~= false and type(__butter_box) == "function" then
       __butter_net_shown = __butter_net_shown + 1
@@ -1512,10 +1514,12 @@ do
   local counts = {}
   local order = {}
   __butter_made = {}
+  __butter_made_n = 0
 
   local function __butter_count_new(class)
     counts[class] = (counts[class] or 0) + 1
     __butter_made[class] = (__butter_made[class] or 0) + 1
+    __butter_made_n = __butter_made_n + 1
     if #order < 40 then order[#order + 1] = class end
   end
 
@@ -1989,10 +1993,34 @@ while true do
   if coroutine.status(__butter_main_co) == "dead" then break end
   local t = 0
   pcall(function() t = os.clock() - __butter_runner_t0 end)
+  -- live counters: they say where the script actually IS
+  local http_n = 0
+  pcall(function() http_n = (__butter_count and __butter_count.http) or 0 end)
+  local made_n = 0
+  pcall(function() made_n = __butter_made_n or 0 end)
+  local last = ""
+  pcall(function() last = tostring(__butter_last_url or "") end)
+  if #last > 70 then last = string.sub(last, 1, 70) .. "..." end
+  -- is there a ScreenGui in CoreGui, and is it enabled?
+  local gui = ""
+  pcall(function()
+    local G = _G and _G.game
+    if type(G) == "table" and type(G.GetService) == "function" then
+      local cg = G:GetService("CoreGui")
+      for _, ch in ipairs(cg:GetChildren()) do
+        if ch:IsA("ScreenGui") then
+          gui = gui .. ch.Name .. "(enabled=" .. tostring(ch.Enabled) .. ") "
+        end
+      end
+    end
+  end)
   __butter_runner_panel(string.format(
-    "[Butter] protected script running...\n%d s of CPU time, %s global resolutions"
-    .. "\nthis is normal - the Luraph VM is heavy.  Please wait.",
-    t, tostring(__butter_calls or 0)))
+    "[Butter] protected script running...\n%d s CPU, %s global resolutions"
+    .. "\nHTTP requests: %s    instances created: %s"
+    .. "\nCoreGui ScreenGuis: %s"
+    .. "\nlast URL: %s",
+    t, tostring(__butter_calls or 0), tostring(http_n), tostring(made_n),
+    (gui ~= "" and gui or "(none)"), (last ~= "" and last or "(none)")))
   if t > __butter_runner_limit then
     __butter_runner_err = "the protected script did not finish within "
       .. tostring(__butter_runner_limit) .. " seconds - it was stopped"
