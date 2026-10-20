@@ -42,6 +42,15 @@ if (count !== 1) {
 
 const stubList = poolNames.map((n) => '    "' + n + '",').join("\n");
 
+// FAITHFUL MODE (the default): the protected script is given the CLIENT'S
+// OWN global table, identity intact.  The embedded Luraph runtime inspects
+// the environment it is given (it loops forever when it is not satisfied),
+// and a copy of the global table is detectable (getfenv() == _G is false,
+// and the copy has a metatable the real one does not).
+//   node build_keyless.js          -> faithful
+//   node build_keyless.js copy     -> the old snapshot-copy environment
+const FAITHFUL = !process.argv.includes("copy");
+
 const header = `--[[
   Butter  -  Build A Boat For Treasure  (PlaceId 537413528)
   BUTTER_HUB - key system removed.
@@ -111,6 +120,14 @@ end
 -- FILL MISSING ONLY, so the first source that HAS a name wins and a
 -- sandbox that lacks the standard library can never overwrite it:
 --     _G  ->  getfenv(0)  ->  getgenv()  ->  getrenv()
+--
+-- FAITHFUL MODE (the default):
+--   __butter_env IS the client's real global table, not a copy of it.
+--   The embedded Luraph runtime validates the environment it is given
+--   (it loops forever when it is not satisfied), and the two things it
+--   can see are the table's IDENTITY (getfenv() == _G) and its
+--   metatable.  A copy fails both.  So: use the real table, and add to
+--   it only what is missing.
 local __butter_env = {}
 local function __butter_merge(dst, src)
   if type(src) ~= "table" then return end
@@ -122,6 +139,24 @@ __butter_merge(__butter_env, __butter_globals)
 __butter_merge(__butter_env, __REAL_ENV)
 __butter_merge(__butter_env, __butter_genv)
 __butter_merge(__butter_env, __butter_renv)
+
+if FAITHFUL then
+  -- use the client's real global table, identity intact
+  local real_env = nil
+  pcall(function()
+    if type(getfenv) == "function" then real_env = getfenv(0) end
+  end)
+  if type(real_env) ~= "table" then real_env = _G end
+  if type(real_env) == "table" then
+    for k, v in pairs(__butter_env) do
+      if real_env[k] == nil then pcall(function() real_env[k] = v end) end
+    end
+    __butter_env = real_env
+  end
+  print("environment: the client's REAL global table (identity intact)")
+else
+  print("environment: a snapshot copy")
+end
 
 -- Indexed lookup across every source.  pairs() cannot see metatable
 -- backed members (Roblox locks some tables), so the names that matter
@@ -448,8 +483,9 @@ const CLEAN_LAYERS = ["butter_box.lua", "butter_net.lua", "butter_envfix.lua",
 const CLEAN = process.argv.includes("clean");
 const layers = CLEAN ? CLEAN_LAYERS : DIAG_LAYERS;
 console.log("mode: " + (CLEAN ? "CLEAN (diagnostics stripped)" : "DIAGNOSTIC"));
-const diag = layers.map((f) => fsx.readFileSync(D + f, "latin1")).join("")
-  + "\n__butter_diag = " + (CLEAN ? "false" : "true") + "\n";
+const diag = "\n__butter_faithful = " + (FAITHFUL ? "true" : "false") + "\n"
+  + "__butter_diag = " + (CLEAN ? "false" : "true") + "\n"
+  + layers.map((f) => fsx.readFileSync(D + f, "latin1")).join("");
 
 // --- second patch: the VM's own table -------------------------------------
 // The protected file's last statement is  return({...}):B()(...);
@@ -681,6 +717,19 @@ const runnerPost = [
   "      idn = tostring(__butter_env.identifyexecutor())",
   "    end",
   "  end)",
+  "  -- environment FIDELITY: the runtime can see all of this",
+  "  local fid = \"?\"",
+  "  pcall(function()",
+  "    local t1 = typeof(__butter_env.game)",
+  "    local t2 = tostring(__butter_env.game)",
+  "    local same = \"?\"",
+  "    pcall(function() same = tostring(getfenv(0) == _G) end)",
+  "    local mt = \"nil\"",
+  "    pcall(function() mt = tostring(getmetatable(getfenv(0))) end)",
+  "    fid = \"game typeof=\" .. tostring(t1) .. \" tostring=\" .. tostring(t2)",
+  "      .. \" getfenv(0)==_G:\" .. tostring(same)",
+  "      .. \" envMeta=\" .. tostring(mt)",
+  "  end)",
   "  local setfenv_n = 0",
   "  local ide_n = 0",
   "  pcall(function()",
@@ -693,10 +742,11 @@ const runnerPost = [
   "    .. \"\\nCoreGui ScreenGuis: %s\"",
   "    .. \"\\nsetfenv: %s works=%s   debug.info=%s debug.getinfo=%s   executor=%s\"",
   "    .. \"\\nsetfenv calls: %s   identifyexecutor calls: %s\"",
+  "    .. \"\\n%s\"",
   "    .. \"\\nlast URL: %s\",",
   "    t, tostring(__butter_calls or 0), tostring(http_n), tostring(made_n),",
   "    (gui ~= \"\" and gui or \"(none)\"),",
-  "    sf, sfw, dbi, dbg, idn, tostring(setfenv_n), tostring(ide_n),",
+  "    sf, sfw, dbi, dbg, idn, tostring(setfenv_n), tostring(ide_n), fid,",
   "    (last ~= \"\" and last or \"(none)\")))",
   "  __butter_runner_last = __butter_runner_label and __butter_runner_label.Text or \"\"",
   "  -- and the diagnostics, in the SAME panel: the separate top-left box is",
