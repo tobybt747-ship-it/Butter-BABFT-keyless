@@ -60,6 +60,8 @@ end
 -- die with "attempt to index nil with 'info'".
 local __butter_never_stub = {
   load = true, loadstring = true, require = true, getfenv = true, setfenv = true,
+  getgenv = true, getrenv = true, getcallingscript = true, newproxy = true,
+  setclipboard = true, identifyexecutor = true, queue_on_teleport = true,
   debug = true, getinfo = true, traceback = true, error = true, pcall = true,
   xpcall = true, type = true, typeof = true, tostring = true, tonumber = true,
   select = true, assert = true, rawget = true, rawset = true, getmetatable = true,
@@ -81,6 +83,7 @@ elseif type(__butter_env.loadstring) == "function" then
 end
 
 -- names the script references that this environment does not provide
+__butter_stubbed = {}
 for _, k in ipairs({
     "NextInteger",
     "string",
@@ -386,7 +389,35 @@ for _, k in ipairs({
 }) do
   if __butter_env[k] == nil and not __butter_never_stub[k] then
     __butter_env[k] = __butter_stub(k)
+    __butter_stubbed[#__butter_stubbed + 1] = k
   end
+end
+
+-- getgenv: the key gate reads the key through it.  If the client does
+-- not provide it, the gate hits "attempt to index nil with 'LDKey'",
+-- the gate's own pcall swallows that, and the script exits silently
+-- having built nothing.  So provide a real one.
+if type(__butter_env.getgenv) ~= "function" then
+  local __butter_genv_tbl = {}
+  for _, k in ipairs({ "LDKey", "LD_KEY", "script_key", "Key", "KEY", "key",
+                       "ButterKey", "BUTTER_KEY", "ld_key", "ldkey" }) do
+    __butter_genv_tbl[k] = __butter_key
+  end
+  __butter_env.getgenv = function() return __butter_genv_tbl end
+  __butter_env.getrenv = function() return __butter_env end
+end
+
+-- report what this client is missing
+if type(__butter_box) == "function" then
+  pcall(function()
+    local missing = table.concat(__butter_stubbed, ", ")
+    if #missing > 900 then missing = string.sub(missing, 1, 900) .. " ..." end
+    __butter_box("[Butter] missing globals",
+      (#__butter_stubbed .. " of the script's names were not in this environment and had to be stubbed:" .. string.char(10)
+        .. (missing ~= "" and missing or "(none)"))
+      .. string.char(10) .. "getgenv = " .. tostring(type(__butter_env.getgenv))
+      .. string.char(10) .. "getrenv = " .. tostring(type(__butter_env.getrenv)))
+  end)
 end
 
 -- report what the important ones ended up being
@@ -959,6 +990,63 @@ if type(__butter_box) == "function" then
       .. "\\ngetfenv    = " .. tostring(type(__butter_env.getfenv))
       .. "\\ndebug      = " .. tostring(type(__butter_env.debug))
       .. "\\nerror      = " .. tostring(type(__butter_env.error)))
+  end)
+end
+-- ------------------------------------------------------------------
+-- Log every key the script reads from getgenv().
+--
+-- The key gate reads the key through getgenv().  If it reads a name
+-- we do not provide, it silently exits (its own pcall swallows the
+-- error) and the script builds nothing at all - exactly the symptom
+-- we are chasing.  This shows the name.
+-- ------------------------------------------------------------------
+
+do
+  local seen = {}
+  local count = 0
+
+  local function __butter_wrap_genv(g)
+    if type(g) ~= "table" then return g end
+    if getmetatable(g) and getmetatable(g).__index then return g end
+    setmetatable(g, {
+      __index = function(t, k)
+        local v = rawget(t, k)
+        count = count + 1
+        if count <= 25 and not seen[k] then
+          seen[k] = true
+          if type(__butter_box) == "function" then
+            pcall(function()
+              __butter_box("[Butter] getgenv read",
+                tostring(k) .. "  ->  " .. tostring(v), 460, Color3.fromRGB(25, 35, 55))
+            end)
+          end
+        end
+        return v
+      end,
+    })
+    return g
+  end
+
+  pcall(function()
+    local real = __REAL_ENV.getgenv
+    if type(real) == "function" then
+      __REAL_ENV.getgenv = function()
+        local ok, g = pcall(real)
+        if not ok or type(g) ~= "table" then g = {} end
+        return __butter_wrap_genv(g)
+      end
+    end
+  end)
+
+  pcall(function()
+    if type(__butter_env.getgenv) == "function" then
+      local inner = __butter_env.getgenv
+      __butter_env.getgenv = function(...)
+        local ok, g = pcall(inner, ...)
+        if not ok or type(g) ~= "table" then g = {} end
+        return __butter_wrap_genv(g)
+      end
+    end
   end)
 end
 -- ------------------------------------------------------------------
