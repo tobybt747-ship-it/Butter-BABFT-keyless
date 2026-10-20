@@ -10,6 +10,16 @@
 ]]
 
 local __REAL_ENV = getfenv and getfenv(0) or _G
+
+-- The real global table.  On some clients getfenv(0) is a sandbox
+-- without the standard library, which makes the protected script
+-- silently do nothing (a stubbed task.spawn never runs its function).
+local __butter_globals = {}
+pcall(function()
+  if type(_G) == "table" then
+    for k, v in pairs(_G) do __butter_globals[k] = v end
+  end
+end)
 local __butter_key = "LD12345678999999"
 
 local function __butter_stub(name)
@@ -24,7 +34,9 @@ local function __butter_stub(name)
 end
 
 -- plain snapshot: no metamethod on the hot path
+-- real globals first, then whatever the client's own environment has
 local __butter_env = {}
+for k, v in pairs(__butter_globals) do __butter_env[k] = v end
 for k, v in pairs(__REAL_ENV) do __butter_env[k] = v end
 
 -- the key the gate reads
@@ -408,17 +420,6 @@ if type(__butter_env.getgenv) ~= "function" then
 end
 
 -- report what this client is missing
-if type(__butter_box) == "function" then
-  pcall(function()
-    local missing = table.concat(__butter_stubbed, ", ")
-    if #missing > 900 then missing = string.sub(missing, 1, 900) .. " ..." end
-    __butter_box("[Butter] missing globals",
-      (#__butter_stubbed .. " of the script's names were not in this environment and had to be stubbed:" .. string.char(10)
-        .. (missing ~= "" and missing or "(none)"))
-      .. string.char(10) .. "getgenv = " .. tostring(type(__butter_env.getgenv))
-      .. string.char(10) .. "getrenv = " .. tostring(type(__butter_env.getrenv)))
-  end)
-end
 
 -- report what the important ones ended up being
 
@@ -990,6 +991,35 @@ if type(__butter_box) == "function" then
       .. "\\ngetfenv    = " .. tostring(type(__butter_env.getfenv))
       .. "\\ndebug      = " .. tostring(type(__butter_env.debug))
       .. "\\nerror      = " .. tostring(type(__butter_env.error)))
+  end)
+end
+
+if type(__butter_box) == "function" then
+  pcall(function()
+    local function t(v) return type(v) end
+    __butter_box("[Butter] key libraries",
+      "task       = " .. t(__butter_env.task)
+      .. string.char(10) .. "task.spawn  = " .. t(__butter_env.task and rawget(__butter_env.task, "spawn"))
+      .. string.char(10) .. "coroutine  = " .. t(__butter_env.coroutine)
+      .. string.char(10) .. "Instance   = " .. t(__butter_env.Instance)
+      .. string.char(10) .. "game       = " .. t(__butter_env.game)
+      .. string.char(10) .. "workspace  = " .. t(__butter_env.workspace)
+      .. string.char(10) .. "script     = " .. t(__butter_env.script)
+      .. string.char(10) .. "getgenv    = " .. t(__butter_env.getgenv)
+      .. string.char(10) .. "table      = " .. t(__butter_env.table)
+      .. string.char(10) .. "string     = " .. t(__butter_env.string))
+  end)
+end
+-- which of the script's names this client does not provide
+if type(__butter_box) == "function" then
+  pcall(function()
+    local missing = table.concat(__butter_stubbed, ", ")
+    if #missing > 900 then missing = string.sub(missing, 1, 900) .. " ..." end
+    __butter_box("[Butter] missing globals",
+      (#__butter_stubbed .. " of the script's names were not in this environment and had to be stubbed:" .. string.char(10)
+        .. (missing ~= "" and missing or "(none)"))
+      .. string.char(10) .. "getgenv = " .. tostring(type(__butter_env.getgenv))
+      .. string.char(10) .. "getrenv = " .. tostring(type(__butter_env.getrenv)))
   end)
 end
 -- ------------------------------------------------------------------
