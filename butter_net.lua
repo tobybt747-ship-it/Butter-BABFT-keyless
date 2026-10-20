@@ -187,6 +187,11 @@ do
   local function __butter_wrap_http_service(real)
     if type(real) ~= "table" then return real end
     return setmetatable({}, {
+      -- Roblox's typeof() reads __type out of the metatable, and
+      -- tostring() reads __name.  Without them the proxy is obvious:
+      -- typeof(HttpService) would be "table" instead of "Instance".
+      __type = "Instance",
+      __name = "HttpService",
       __index = function(_, k)
         if k == "RequestAsync" then
           return function(self, url, opts)
@@ -241,6 +246,10 @@ do
       return f
     end
     return setmetatable({}, {
+      -- typeof(game) must say "Instance" and tostring(game) must not say
+      -- "table" - the runtime can tell a proxy from the real DataModel.
+      __type = "Instance",
+      __name = "DataModel",
       __index = function(_, k)
         if k == "GetService" then
           return function(self, name, ...)
