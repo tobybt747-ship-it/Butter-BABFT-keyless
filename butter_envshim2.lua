@@ -96,15 +96,17 @@ do
   end)
 
   -- 2. universal fallback for ANY missing global in the VM's env
+  --
+  -- The stub is CACHED (see build_keyless.js): the VM resolves a global
+  -- roughly 25 million times per run, and building a fresh table + metatable
+  -- on every miss froze the client.  Nothing else may allocate here either -
+  -- no string.lower(), no find() - or the GC thrash comes back.
   pcall(function()
     local mt = getmetatable(__butter_env)
     if mt == nil then
       setmetatable(__butter_env, {
         __index = function(t, k)
-          if type(k) == "string" then
-            if k == "debug" then return __butter_dbg end
-            if k:lower():find("key") then return __butter_key end
-          end
+          if k == "debug" then return __butter_dbg end
           return __butter_stub(tostring(k))
         end,
       })
