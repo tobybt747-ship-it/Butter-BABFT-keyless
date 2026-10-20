@@ -2177,6 +2177,19 @@ while true do
     (gui ~= "" and gui or "(none)"),
     sf, sfw, dbi, dbg, idn,
     (last ~= "" and last or "(none)")))
+  __butter_runner_last = __butter_runner_label and __butter_runner_label.Text or ""
+  -- and the diagnostics, in the SAME panel: the separate top-left box is
+  -- not always visible, and this panel always is.
+  do
+    local diag = ""
+    pcall(function()
+      diag = tostring(__butter_box_text or "")
+      if #diag > 900 then diag = string.sub(diag, 1, 900) .. "..." end
+    end)
+    if diag ~= "" then
+      __butter_runner_panel(__butter_runner_last .. "\n" .. diag)
+    end
+  end
   if t > __butter_runner_limit then
     __butter_runner_err = "the protected script did not finish within "
       .. tostring(__butter_runner_limit) .. " seconds - it was stopped"
