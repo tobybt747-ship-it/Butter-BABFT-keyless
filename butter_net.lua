@@ -222,8 +222,20 @@ do
   -- ------------------------------------------------------------------
   -- `game` - a transparent proxy that intercepts GetService and HttpGet
   -- ------------------------------------------------------------------
+  local __butter_http_service_proxy = nil
   local function __butter_wrap_game(real)
     if type(real) ~= "table" then return real end
+    -- Bound methods are CACHED.  The proxy's __index must not allocate a new
+    -- closure on every single access - the script touches `game` a lot.
+    local bound = {}
+    local function __butter_bind(k, v)
+      local f = bound[k]
+      if f == nil then
+        f = function(self, ...) return v(real, ...) end
+        bound[k] = f
+      end
+      return f
+    end
     return setmetatable({}, {
       __index = function(_, k)
         if k == "GetService" then
@@ -235,7 +247,12 @@ do
             end
             __butter_bump("getservice")
             local svc = real:GetService(name, ...)
-            if name == "HttpService" then svc = __butter_wrap_http_service(svc) end
+            if name == "HttpService" then
+              if __butter_http_service_proxy == nil then
+                __butter_http_service_proxy = __butter_wrap_http_service(svc)
+              end
+              svc = __butter_http_service_proxy
+            end
             return svc
           end
         end
@@ -243,9 +260,7 @@ do
           return function(self, url) return __butter_body_for(url) end
         end
         local v = real[k]
-        if type(v) == "function" then
-          return function(self, ...) return v(real, ...) end
-        end
+        if type(v) == "function" then return __butter_bind(k, v) end
         return v
       end,
       __newindex = function(_, k, v) pcall(function() rawset(real, k, v) end) end,
@@ -348,21 +363,21 @@ do
       t.spawn = function(f, ...)
         if type(f) ~= "function" then return nil end
         __butter_bump("task_spawn")
-        local ran = false
-        local args = table.pack(...)
-        local wrapped = function(...) ran = true; return f(...) end
         local res = nil
-        pcall(function()
-          if type(real_spawn) == "function" then
-            res = real_spawn(wrapped, table.unpack(args, 1, args.n))
-          end
-        end)
-        if not ran then
-          -- the client's spawn did not run it -> run it here
-          __butter_bump("task_spawn_rescued")
+        if type(real_spawn) == "function" then
+          -- The client's spawn is trusted: it runs the function synchronously,
+          -- so it is NOT run twice here.
+          local args = table.pack(...)
           pcall(function()
-            local co = coroutine.create(wrapped)
-            local ok, err = coroutine.resume(co)
+            res = real_spawn(f, table.unpack(args, 1, args.n))
+          end)
+        else
+          -- No spawn at all -> run it here.
+          __butter_bump("task_spawn_rescued")
+          local args = table.pack(...)
+          pcall(function()
+            local co = coroutine.create(f)
+            local ok, err = coroutine.resume(co, table.unpack(args, 1, args.n))
             if not ok and type(__butter_box) == "function" then
               pcall(function()
                 __butter_box("[Butter] task.spawn rescue error", tostring(err),
@@ -410,6 +425,9 @@ do
 
     pcall(function()
       local RT = task
+      if type(RT) ~= "table" or type(RT.delay) ~= "function" then
+        pcall(function() RT = __butter_env and __butter_env.task end)
+      end
       if type(RT) == "table" and type(RT.delay) == "function" then
         RT.delay(12, function() __butter_verdict("12s") end)
       end
